@@ -275,5 +275,3 @@ extern (C) void Init_dexitest()
     block_call_sink = rb_ary_new();
     rb_gc_register_address(&block_call_sink);
 }
-
-{"id":"25099810-0fd1-4b86-a00c-2b2c92d5b019","session_id":"679b879636d6cfe8","timestamp":"2026-10-11T19:32:07+00:00","model":"z-ai/glm-5.3","provider":"openrouter","prompt_tokens":21914,"completion_tokens":51,"cache_read_tokens":16320,"cache_write_tokens":0,"cost_usd":0.00145238,"cost_source":"api"}
