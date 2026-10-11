@@ -42,4 +42,4 @@ jobs:
       - name: ABI audit
         run: |
           export PATH=/opt/ruby/bin:$PATH
-          scripts/abi_audit.sh /opt/ruby/bin/ruby
+          bash scripts/abi_audit.sh /opt/ruby/bin/ruby
