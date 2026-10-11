@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain (gdc-14 + ruby 4.0)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gdc-14 ruby ruby-dev
+          # Build ruby 4.0.7 from source (Ubuntu 24.04 ships 3.2; the suite
+          # targets the 4.0 C API). Use autoconf like a plain extension build.
+          sudo apt-get install -y autoconf bison build-essential libssl-dev libyaml-dev zlib1g-dev
+          # tag format changed in 4.0: v4.0.7 (dots), not the old v4_0_7
+          git clone --depth 1 --branch v4.0.7 https://github.com/ruby/ruby.git /tmp/ruby-src
+          cd /tmp/ruby-src
+          ./autogen.sh
+          ./configure --prefix=/opt/ruby --disable-install-doc --enable-shared
+          make -j"$(nproc)"
+          sudo make install
+          echo "/opt/ruby/bin" | sudo tee /etc/profile.d/ruby40.sh >/dev/null
+
+      - name: Show versions
+        run: |
+          gdc-14 --version | head -1
+          /opt/ruby/bin/ruby -v
+
+      - name: Acceptance + experiment suites
+        run: |
+          export PATH=/opt/ruby/bin:$PATH
+          make RUBY=/opt/ruby/bin/ruby GDC=gdc-14 test
+          make RUBY=/opt/ruby/bin/ruby GDC=gdc-14 exp-test
+
+      - name: ABI audit
+        run: |
+          export PATH=/opt/ruby/bin:$PATH
+          bash scripts/abi_audit.sh /opt/ruby/bin/ruby
