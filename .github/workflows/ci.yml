@@ -23,7 +23,7 @@ jobs:
           git clone --depth 1 --branch v4.0.7 https://github.com/ruby/ruby.git /tmp/ruby-src
           cd /tmp/ruby-src
           ./autogen.sh
-          ./configure --prefix=/opt/ruby --disable-install-doc
+          ./configure --prefix=/opt/ruby --disable-install-doc --enable-shared
           make -j"$(nproc)"
           sudo make install
           echo "/opt/ruby/bin" | sudo tee /etc/profile.d/ruby40.sh >/dev/null
