@@ -18,7 +18,7 @@ DFLAGS := -fPIC -Isrc -I$(RUBYHDR) -I$(RUBYARCHHDR) \
 
 DC_SRCS := $(wildcard src/rudy/*.d src/rudy/bind/*.d)
 
-EXP_SRCS := exp_wrap exp_cross exp_perf
+EXP_SRCS := exp_wrap exp_cross exp_perf exp_http exp_gcstorm exp_exc
 
 .PHONY: all clean test check typed-test exp exp-test
 
@@ -54,6 +54,9 @@ exp-test: exp
 	$(RUBY) experiments/test_exp_wrap.rb
 	$(RUBY) experiments/test_exp_cross.rb
 	$(RUBY) experiments/test_exp_perf.rb
+	$(RUBY) experiments/test_exp_http.rb
+	$(RUBY) experiments/test_exp_gcstorm.rb
+	$(RUBY) experiments/test_exp_exc.rb
 
 # Ruby-side acceptance suite (dexter revival + missing-API bindings)
 test: all

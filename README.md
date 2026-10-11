@@ -67,10 +67,22 @@ alias and a plain `ulong` param means "decode me".
 
 ### D gotchas
 
+The torture experiments found **ten** D-specific traps; the full catalog
+with fixes lives in experiments/NOTES.md. The ones that will bite you on
+day one:
+
 - **Uninitialized `double x;` is NaN** — not 0.0 (D's `float.init` is NaN).
   Always write `double x = 0.0;` for accumulators; a NaN accumulator
   silently poisons every sum that touches it. This bit three separate
-  times in the torture tests (see experiments/NOTES.md).
+  times in the torture tests.
+- **A .so extension dlopen'd by Ruby never runs D's `rt_init()`** — the D
+  GC lazy-initializes so allocation appears to work, but the first
+  `GC.collect()` or `Thread.sleep` from D hard-aborts. Call
+  `import core.runtime : rt_init; rt_init();` at the top of `Init_*`.
+- **Module variables are thread-local by default** — Ruby threads are OS
+  pthreads, so shared state needs `__gshared`.
+- **D exceptions must never escape an extern(C) frame** (or a
+  no-GVL callback) — catch in D, raise Ruby-side after re-acquiring the GVL.
 - Uninitialized integers and pointers are fine (0/null).
 
 ## Wrapping D structs: `RudyTypedData`
@@ -135,14 +147,17 @@ extension methods by hand (extern(C) bodies registered directly):
 - **Blocks/iteration**: `rb_yield`, `rb_yield_values2`, `rb_yield_splat`,
   `rb_block_call` (C-implemented blocks!), `rb_block_given_p`, `rb_each`
 - **Structured exceptions**: `rb_rescue` (single StandardError family),
-  `rb_ensure`, `rb_protect`
+  `rb_ensure`, `rb_protect`, `rb_exc_raise` (re-raise the *same* exception
+  VALUE), `rb_errinfo`/`rb_set_errinfo`
 - **Per-object methods**: `rb_define_singleton_method`
 - **GVL**: `rb_thread_call_without_gvl` / `_with_gvl` (pure-D work can
   release the GVL so other Ruby threads run), `RUBY_UBF_IO`
 - **Arg scanning**: `rb_scan_args` (argc/argv style)
 
 `src/dexitest.d` + `test/exitest.rb` exercise all of these (31
-assertions) alongside the fixed-arity `def!` suite.
+assertions) alongside the fixed-arity `def!` suite; the exception and
+GVL bindings are additionally tortured by `experiments/exp_exc` and
+`experiments/exp_http` (see experiments/NOTES.md).
 
 ## Layout
 
@@ -154,7 +169,8 @@ src/rudy/typeddata.d    RudyTypedData mixin: wrap D structs as Ruby objects
 src/dextest.d           acceptance-test extension (old "dexter" revived)
 src/dexitest.d          missing-API bindings acceptance extension
 src/dtypetest.d         typed-data acceptance extension
-test/run.rb             Ruby-side acceptance suite (17 assertions)
+experiments/           six torture experiments (see experiments/NOTES.md)
+test/run.rb             Ruby-side acceptance suite (22 assertions)
 test/exitest.rb         bindings acceptance suite (31 assertions)
 test/typedtest.rb       typed-data acceptance suite (9 assertions)
 ```
@@ -171,11 +187,26 @@ functions (`rb_string_value_ptr`, `rb_float_value`, `rb_ary_entry`, ...).
 - GDC ≥ 13 (tested: gdc-14 14.2.0, D front-end 2.10x)
 - GNU make
 
+## Torture experiments (`experiments/`)
+
+Six torture experiments probe the D↔Ruby seam far past what the acceptance
+suites cover — GVL-released blocking I/O with a hand-written TCP server,
+48k-object TypedData GC storms against a concurrent `GC.collect()` churn
+thread, 50-level exception ping-pong with `rb_rescue`/`rb_ensure`/nested
+`rb_protect` and `rb_exc_raise` identity, perf, and more. They found ten real
+bugs (ABI widths, a missing `rt_init()`, thread-local-by-default module
+state, a TypedData free-callback routing bug, ...), all documented with
+fixes in **experiments/NOTES.md** — that file is the real catalog of
+D-specific traps when writing Ruby extensions. Run them with `make exp`
+then `make exp-test`.
+
 ## Build & test
 
 ```sh
 make        # builds .build/dextest.so, .build/dexitest.so and .build/dtypetest.so
-make test   # runs test/run.rb + test/exitest.rb + test/typedtest.rb (55 assertions)
+make test   # runs test/run.rb + test/exitest.rb + test/typedtest.rb (62 assertions)
+make exp    # builds the six experiment extensions (experiments/)
+make exp-test  # runs all six torture suites (66 assertions, see experiments/NOTES.md)
 ```
 
 The Makefile finds Ruby via `ruby -e` hdrdir/libdir queries (works with

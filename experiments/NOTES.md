@@ -1,12 +1,15 @@
 # Experiments — Findings & Notes
 
-Three torture tests, all passing (`make exp-test`):
+Six torture tests, all passing (`make exp-test`):
 
 | # | Experiment | What it tortures |
 |---|------------|------------------|
 | 1 | `exp_wrap` | Wrapping a D struct (`DMatrix`) as a Ruby object: `rb_data_object_wrap` + free callback, `rb_define_alloc_func`, `rb_obj_id`-keyed D-side registry, GC stress (100k wraps, RSS delta) |
 | 2 | `exp_cross` | Two-way boundary crossing: D calls Ruby blocks (`rb_funcall_with_block`), D builds Arrays and calls Ruby methods back, `rb_protect` catching a Ruby raise across 50 D frames, shoelace polygon math with D↔Ruby data flow |
 | 3 | `exp_perf` | Perf: pure-D fib(28) in ~4ms, boundary-crossing fib(18) (~2.9ms, every level re-enters Ruby), 100k Float array build, 10k-entry D AA → Ruby Hash |
+| 4 | `exp_http` | GVL-released blocking I/O: a hand-written TCP server loop in pure D running with the GVL released (`rb_thread_call_without_gvl`), D thread writing to a Ruby `Queue`, `rb_syserr_new` from `errno`, two Ruby threads hammering the server concurrently (11 assertions) |
+| 5 | `exp_gcstorm` | GC storm at the D↔Ruby seam: 48,100 malloc'd TypedData wrappers crossing the boundary while a D churn thread allocates and `GC.collect()`s in a loop; exact free-count accounting, alloc/free balance == 0 (no leak, no double free), idempotent churn control (9 assertions) |
+| 6 | `exp_exc` | Exception ping-pong: `rb_rescue`/`rb_ensure`/nested `rb_protect`, 50-level D↔Ruby mutual recursion with a raise at the bottom and rescue at the top, `rb_exc_raise` re-raising the *same* exception VALUE (identity check), all D-side counters intact after every longjmp unwind (19 assertions) |
 
 ## Bugs found by the torture tests (and fixes)
 
@@ -40,24 +43,73 @@ Three torture tests, all passing (`make exp-test`):
    `rb_funcall_with_block(ary, rb_intern("sort"), 0, null, blk)` — that symbol
    had to be bound in `value.d` (it wasn't in the original binding set).
 
+6. **D module-level variables are thread-local by default; Ruby threads are
+   OS pthreads** (exp_http). A module var written by a D helper thread was
+   invisible to the Ruby thread that read it. Fix: `__gshared` for any
+   module state shared across threads.
+
+7. **A D exception escaping a `rb_thread_call_without_gvl` callback aborts
+   the whole D runtime** (exp_http). D exceptions must never unwind through
+   extern(C) frames into Ruby-managed code. Fix: try/catch *inside* the
+   callback; record the failure; re-raise Ruby-side after the GVL is
+   re-acquired.
+
+8. **`cast(TcpSocket)` on `Socket.accept()`'s result is a runtime-checked
+   downcast**, which returned null for the accepted connection class and
+   segfaulted on first use (exp_http). Fix: type the accepted socket as the
+   base `Socket`, not the subclass.
+
+9. **GDC .so files dlopen'd by Ruby never run D's `rt_init()`** (exp_gcstorm).
+   The D GC lazy-initializes on first `new`, so allocation "works", but
+   `core.time`'s `_ticksPerSecond` is only filled by `_d_initMonoTime()`
+   from rt_init — the first `GC.collect()` or `Thread.sleep` from a D thread
+   hard-aborts: "MonoTimeImpl failed to get the frequency of the system's
+   monotonic clock" (SIGABRT racing the Ruby VM; the process dies).
+   Backtrace confirmed: churn_loop → ConservativeGC.fullCollect →
+   MonoTimeImpl.currTime → abort. **Fix: `import core.runtime : rt_init;
+   rt_init();` at the top of `Init_*`** in every dlopen'd extension.
+
+10. **`RudyTypedData`'s wrap function hard-codes `&name_type`** (exp_gcstorm).
+    Copying the generated descriptor and overriding `.dfree` on the copy
+    does nothing — `name_wrap` still wraps with the original descriptor, so
+    a custom free callback was never invoked (free_count stayed 0 while the
+    storm ran). Fix: the mixin takes the free callback as an optional third
+    template parameter — `mixin RudyTypedData!(StormCell, "stormcell",
+    &stormcell_free);` (the free function must be declared before the
+    mixin; a leftover duplicate plain `mixin RudyTypedData!(...)` line caused
+    conflicting-symbol compile errors and was removed).
+
 ## API gaps worth adding to the library
 
 Verified exported by libruby but **not yet bound** in `rudy/bind/value.d`:
 
-- `rb_yield_block`, `rb_block_call` — proper block/yield support (def! has no
-  block plumbing at all)
-- `rb_rescue`, `rb_ensure` — structured exception handling from D (only
-  `rb_protect` is bound today)
+- ~~`rb_yield_block`, `rb_block_call`~~ — bound; exercised in exp_cross /
+  dexitest
+- ~~`rb_rescue`, `rb_ensure`~~ — bound; tortured in exp_exc (rb_protect was
+  already there)
 - ~~`rb_check_typeddata`, `rb_data_object_zalloc`, `rb_data_typed_object_wrap`~~
   — bound in `rudy/bind/value.d` + `RudyTypedData` helper in `rudy/typeddata.d`
-  (see finding 1)
-- `rb_define_singleton_method` — needed for per-object methods, not just
-  module/class methods
-- GVL/GC APIs: `rb_thread_call_without_gvl`, `rb_thread_call_without_gvl2`
-  — required before any real threading story
-- `rb_str_new` variadic family, `rb_num2*` conversion family — def! only
-  supports fixed arity 0..3; **a variadic (argc/argv) trampoline is needed**
-  for real-world methods
+  (see finding 2)
+- ~~`rb_define_singleton_method`~~ — bound; exercised in dexitest
+- ~~GVL/GC APIs: `rb_thread_call_without_gvl`, `rb_thread_call_without_gvl2`~~
+  — bound; exp_http runs a D server loop with the GVL released
+- ~~`rb_str_new` variadic family, `rb_num2*` conversion family~~ — variadic
+  (argc/argv) trampoline shipped in `rudy/defs.d` (optional args via D
+  default values), exercised in dexitest
+
+Newly bound for the torture experiments (all in `rudy/bind/value.d`):
+
+- `rb_exc_raise` — re-raise the *same* exception VALUE from D (noreturn;
+  callers need `assert(0)` after it to satisfy GDC's no-return analysis)
+- `rb_int2inum` — ABI fix: the C header declares `intptr_t`, the old binding
+  said `int`; it silently worked through register reuse but is now `C_long`
+- `rb_errinfo` / `rb_set_errinfo` — inspect/clear Ruby's current exception
+  state from D (used by exp_exc's nested-protect torture)
+
+Still missing / future work:
+
+- `rb_yield` family beyond what's bound; `rb_block_call` with data
+- TypedData mark callbacks (no D-side write barrier integration yet)
 
 ## Perf observations (Ruby 4.0.7, GDC-14, -O2)
 
@@ -69,11 +121,34 @@ Verified exported by libruby but **not yet bound** in `rudy/bind/value.d`:
 - After 100k wrap/unwrap/free cycles: RSS delta ~32 MB retained by the D
   runtime (D GC doesn't promptly return freed object memory to the OS).
   Documented as expected behavior, not a leak per se.
+- exp_gcstorm: 48,100 TypedData wraps allocated, all freed exactly once
+  (atomic-counted dfree); alloc/free balance 0 across 8 concurrent Ruby
+  threads racing a D churn thread doing `new` + `GC.collect()` in a loop.
+
+## GDC-14 quirks catalog (from all six experiments)
+
+- Module variables are thread-local unless `__gshared`/`shared`.
+- `shared` counters need `atomicOp!"+="` (requires a `shared ref`); a plain
+  read for format is fine but `cast(ulong)` it explicitly.
+- `core.thread.Thread`'s constructor takes a plain `void function()`, not
+  an `extern(C)` function.
+- D exceptions must never escape an extern(C) frame or a no-GVL callback —
+  catch in D, re-raise Ruby-side after re-acquiring the GVL.
+- noreturn Ruby APIs (`rb_raise`, `rb_exc_raise`) need `assert(0)` after the
+  call — GDC's no-return analysis flags functions that "fall off the end"
+  otherwise.
+- `import` statements can't appear mid-function; put them at module scope
+  or at the top of the enclosing scope block.
+- Mixin-template instantiations must be unique — a leftover duplicate
+  `mixin RudyTypedData!(...)` line (same T+name) produces conflicting-symbol
+  compile errors.
+- A .so extension dlopen'd by Ruby **must call `rt_init()` itself** (see
+  finding 9) — nothing runs D's runtime init for you.
 
 ## Build/test commands
 
 ```sh
 make exp            # build experiments
-make exp-test       # run all three experiment suites
-ruby test/run.rb    # core dextest suite (17 assertions)
+make exp-test       # run all six experiment suites
+ruby test/run.rb    # core dextest suite
 ```

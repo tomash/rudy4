@@ -79,7 +79,9 @@ long  rb_num2ll(VALUE);
 double rb_num2dbl(VALUE);
 ulong rb_num2ulong(VALUE);
 VALUE rb_ll2inum(long);
-VALUE rb_int2inum(int);
+VALUE rb_int2inum(C_long);   // C ABI: intptr_t — was misbound as int (torture
+                              // finding #4: wrong width silently truncates on
+                              // SysV x86-64 because of register reuse)
 VALUE rb_float_new(double);
 double rb_float_value(VALUE);
 VALUE rb_Integer(VALUE);
@@ -146,6 +148,14 @@ void rb_throw(const(char)* tag, VALUE val);
 void rb_throw_obj(VALUE tag, VALUE val);
 void rb_exit(int status);
 VALUE rb_protect(ProtectFn fn, VALUE data, int* state);
+// Re-raise an existing exception object (the only way to re-raise the SAME
+// exception VALUE from D — rb_raise formats a NEW exception). noreturn.
+void  rb_exc_raise(VALUE exc);
+// After a rb_protect state != 0 (or rb_rescue/rb_ensure rescue path), the
+// pending exception is fetched via rb_errinfo. Without binding it D cannot
+// inspect what Ruby raised while crossing the boundary.
+VALUE rb_errinfo();
+void  rb_set_errinfo(VALUE err);
 int   rb_check_arity(int argc, int min, int max);
 
 // GC
@@ -175,6 +185,7 @@ VALUE rb_yield_block(VALUE yielded_arg, VALUE callback_arg, int argc,
 VALUE rb_block_call(VALUE obj, ID mid, int argc, const(VALUE)* argv,
                     BlockCallFunc proc, VALUE data2);
 int   rb_block_given_p();
+VALUE rb_block_proc();        // materialize the passed block as a Proc VALUE
 VALUE rb_each(VALUE obj);
 
 // structured exception handling from D (only rb_protect was bound before)
