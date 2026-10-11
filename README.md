@@ -57,10 +57,21 @@ parameter types (`long`, `double`, `string`, `bool`, ...); the return
 value is converted back. No `Data_Wrap_Struct`, no struct access, no
 manual `rb_num2long` boilerplate — the trampoline does it.
 
-Supported D parameter types: `bool`, `int`/`uint`/`long`/`long` (`C_long`
+Supported D parameter types: `bool`, `int`/`uint`/`long`/`ulong` (`C_long`
 aliases follow the platform), `double`, `string` (copied via `idup`),
 static and dynamic arrays, and hashes (AAs). Return types: all of the
 above plus `cdouble`/`creal` (mapped to Ruby `Complex` via `rb_funcallv`).
+To receive a raw, unconverted `VALUE`, declare the parameter (or return
+type) as `Raw!VALUE` — passthrough is opt-in since `VALUE` is an `ulong`
+alias and a plain `ulong` param means "decode me".
+
+### D gotchas
+
+- **Uninitialized `double x;` is NaN** — not 0.0 (D's `float.init` is NaN).
+  Always write `double x = 0.0;` for accumulators; a NaN accumulator
+  silently poisons every sum that touches it. This bit three separate
+  times in the torture tests (see experiments/NOTES.md).
+- Uninitialized integers and pointers are fine (0/null).
 
 ## Layout
 

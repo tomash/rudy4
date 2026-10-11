@@ -52,6 +52,13 @@ assert_equal(false, convert_bool_two_ways(false), "def! bool false round trip")
 assert_equal(17, add_five(12), "def! computed int")
 assert_equal("hi tomash 42", DexterModule.greet("tomash", 42), "def! module function, 2 args, mixed types")
 
+# ---------------------------------------------------------------- issue #1 regression: ulong params decode, Raw!VALUE passes bits
+assert_equal(10, identity_ulong(10), "def! ulong param decodes (not tagged)")
+assert_equal(0, identity_ulong(0), "def! ulong zero decodes")
+assert_equal(20, double_it_ulong(10), "def! ulong param arithmetic")
+assert_equal(10, raw_value_id(10), "def! Raw!VALUE passthrough identity")
+assert_equal("abc", raw_value_id("abc"), "def! Raw!VALUE passthrough string object")
+
 # ---------------------------------------------------------------- arity / errors
 assert_raises(ArgumentError) { convert_integer_two_ways }        # wrong arity
 assert_raises(TypeError) { convert_integer_two_ways("nope") }    # bad conversion
