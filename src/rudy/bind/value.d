@@ -44,6 +44,10 @@ alias VALUE function(VALUE) ProtectFn;
 
 VALUE rb_define_class(const(char)* name, VALUE superclass);
 VALUE rb_define_module(const(char)* name);
+VALUE rb_define_class_under(VALUE outer, const(char)* name, VALUE superclass);
+VALUE rb_define_module_under(VALUE outer, const(char)* name);
+VALUE rb_define_method_under(VALUE klass, const(char)* name, AnyMethod func, int argc);
+void  rb_extend_object(VALUE mod);
 void  rb_define_method(VALUE klass, const(char)* name, AnyMethod func, int argc);
 void  rb_define_module_function(VALUE mod, const(char)* name, AnyMethod func, int argc);
 void  rb_define_global_function(const(char)* name, AnyMethod func, int argc);
@@ -62,8 +66,12 @@ alias long ID;
 VALUE rb_funcall(VALUE recv, ID mid, int argc, ...);
 VALUE rb_funcallv(VALUE recv, ID mid, int argc, const(VALUE)* argv);
 VALUE rb_funcallv_public(VALUE recv, ID mid, int argc, const(VALUE)* argv);
+// call mid with argv and a Proc/block (use for methods taking a block:
+// sort, each, map...) — NOT passable as a positional arg via rb_funcallv
+VALUE rb_funcall_with_block(VALUE recv, ID mid, int argc, const(VALUE)* argv, VALUE proc);
 VALUE rb_obj_call_init(VALUE obj, int argc, const(VALUE)* argv);
 VALUE rb_eval_string(const(char)* str);
+VALUE rb_obj_alloc(VALUE klass);
 
 // numbers
 long  rb_num2long(VALUE);

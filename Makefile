@@ -18,7 +18,9 @@ DFLAGS := -fPIC -Isrc -I$(RUBYHDR) -I$(RUBYARCHHDR) \
 
 DC_SRCS := $(wildcard src/rudy/*.d src/rudy/bind/*.d)
 
-.PHONY: all clean test check
+EXP_SRCS := exp_wrap exp_cross exp_perf
+
+.PHONY: all clean test check exp exp-test
 
 all: .build/dextest.so
 
@@ -29,6 +31,18 @@ all: .build/dextest.so
 
 .build:
 	mkdir -p .build
+
+# Experiments: each experiment .d becomes its own .so
+.build/exp_%.so: experiments/exp_%.d $(DC_SRCS) | .build
+	$(GDC) -shared -o $@ $(DFLAGS) $(DC_SRCS) $< \
+	  -L$(LIBRUBY_DIR) $(LIBRUBYARG) -lm
+
+exp: $(addprefix .build/,$(EXP_SRCS:=.so))
+
+exp-test: exp
+	$(RUBY) experiments/test_exp_wrap.rb
+	$(RUBY) experiments/test_exp_cross.rb
+	$(RUBY) experiments/test_exp_perf.rb
 
 # Ruby-side acceptance suite (dexter revival)
 test: all
