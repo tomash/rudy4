@@ -105,7 +105,8 @@ VALUE rb_any_to_s(VALUE obj);
 
 // arrays
 VALUE rb_ary_new();
-VALUE rb_ary_new_capa(long capa);
+VALUE rb_ary_new_capa(C_long capa);
+VALUE rb_ary_new_from_values(C_long n, const(VALUE)* vals);
 VALUE rb_ary_push(VALUE ary, VALUE item);
 VALUE rb_ary_entry(VALUE ary, long offset);
 VALUE rb_ary_store(VALUE ary, long idx, VALUE item);
@@ -156,6 +157,51 @@ VALUE rb_gc_disable();
 // introspection
 int   rb_check_funcall(VALUE recv, ID mid, int argc, const(VALUE)* argv);
 int   rb_respond_to(VALUE obj, ID mid);
+
+// blocks / iteration (bound for PR#4 — issue #4)
+// rb_block_call_func signature (ruby/internal/iterator.h):
+//   VALUE f(VALUE yielded_arg, VALUE callback_arg, int argc,
+//           const VALUE* argv, VALUE blockarg)
+alias VALUE function(VALUE yielded_arg, VALUE callback_arg, int argc,
+                      const(VALUE)* argv, VALUE blockarg) BlockCallFunc;
+alias VALUE function(VALUE data) BodyFunc;              // rb_rescue/rb_ensure b_proc
+alias VALUE function(VALUE data2, VALUE exc) RescueFunc; // rb_rescue r_proc
+VALUE rb_yield(VALUE val);
+VALUE rb_yield_values(int n, ...);
+VALUE rb_yield_values2(int n, const(VALUE)* argv);
+VALUE rb_yield_splat(VALUE ary);
+VALUE rb_yield_block(VALUE yielded_arg, VALUE callback_arg, int argc,
+                     const(VALUE)* argv, VALUE blockarg); // as rb_block_call_func
+VALUE rb_block_call(VALUE obj, ID mid, int argc, const(VALUE)* argv,
+                    BlockCallFunc proc, VALUE data2);
+int   rb_block_given_p();
+VALUE rb_each(VALUE obj);
+
+// structured exception handling from D (only rb_protect was bound before)
+VALUE rb_rescue(BodyFunc b_proc, VALUE data1, RescueFunc r_proc, VALUE data2);
+// rb_rescue2: variadic list of exception classes terminated by (VALUE)0.
+// D has no C varargs forwarding — bind rb_vrescue2 (takes va_list) is not
+// portable either; the common single-class case can use rb_rescue. For
+// multiple classes call with the variadic ABI is NOT provided; use
+// rb_protect + rb_respond_to rescue semantics at Ruby level instead.
+// (Kept out deliberately: calling variadic C from D is not possible.)
+VALUE rb_ensure(BodyFunc b_proc, VALUE data1, BodyFunc e_proc, VALUE data2);
+
+// per-object methods
+void  rb_define_singleton_method(VALUE obj, const(char)* mid, AnyMethod func, int arity);
+
+// GVL (Ruby threading interop)
+alias void  function(void*) UnblockFunc;    // rb_unblock_function_t
+alias void* function(void*) NoGvlFunc;     // func passed to *_without_gvl
+void* rb_thread_call_without_gvl(NoGvlFunc func, void* data1,
+                                 UnblockFunc ubf, void* data2);
+void* rb_thread_call_without_gvl2(NoGvlFunc func, void* data1,
+                                  UnblockFunc ubf, void* data2);
+void* rb_thread_call_with_gvl(NoGvlFunc func, void* data1);
+enum void* RUBY_UBF_IO = cast(void*) -1;    // special UBF for blocking IO
+
+// argument scanning (the C variadic stores into VALUE* slots)
+int   rb_scan_args(int argc, const(VALUE)* argv, const(char)* fmt, ...);
 
 // struct wrapping (minimal; not used by core rudy)
 alias void function(void* ptr) RUBY_DATA_FUNC_MARK;

@@ -59,7 +59,6 @@ VALUE to_ruby_value(T)(T t)
 {
     static if (isRaw!T)               // Raw!VALUE -> pass bits through
         return t.value;
-
     else static if (is(T == bool))
         return t ? Qtrue_ : Qfalse_;
 

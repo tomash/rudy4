@@ -105,6 +105,45 @@ D-side registry needed. Full example (alloc func, `initialize`, `[]`/
 `[]=`, `det`, `to_a`, 100k-object GC stress): `src/dtypetest.d`, suite:
 `test/typedtest.rb` (9 assertions).
 
+### Optional arguments via D default values
+
+A `def!`'d function whose parameters declare D default values is
+registered with arity `-1` and gets a variadic (argc/argv) trampoline:
+missing arguments are substituted with their declared defaults, so from
+Ruby the trailing parameters behave like optional arguments.
+
+```d
+long var_sum(long a, long b = 2, long c = 30) { return a + b + c; }
+def!("MyModule", var_sum);
+```
+
+```ruby
+MyModule.var_sum(1)      # => 33   (b, c defaulted)
+MyModule.var_sum(1, 2)   # => 33   (c defaulted)
+MyModule.var_sum(1, 2, 0) # => 3
+MyModule.var_sum         # ArgumentError (a is required)
+```
+
+Raw `VALUE` parameters (and `VALUE` returns via `to_ruby_value`) pass
+through untouched, so D functions can mix optional and raw-VALUE args.
+
+## Beyond def! — direct C-API bindings
+
+`src/rudy/bind/value.d` also binds the pieces you need to write
+extension methods by hand (extern(C) bodies registered directly):
+
+- **Blocks/iteration**: `rb_yield`, `rb_yield_values2`, `rb_yield_splat`,
+  `rb_block_call` (C-implemented blocks!), `rb_block_given_p`, `rb_each`
+- **Structured exceptions**: `rb_rescue` (single StandardError family),
+  `rb_ensure`, `rb_protect`
+- **Per-object methods**: `rb_define_singleton_method`
+- **GVL**: `rb_thread_call_without_gvl` / `_with_gvl` (pure-D work can
+  release the GVL so other Ruby threads run), `RUBY_UBF_IO`
+- **Arg scanning**: `rb_scan_args` (argc/argv style)
+
+`src/dexitest.d` + `test/exitest.rb` exercise all of these (31
+assertions) alongside the fixed-arity `def!` suite.
+
 ## Layout
 
 ```
@@ -113,8 +152,10 @@ src/rudy/convert.d      to_ruby_value!(T) / d_type!(T) conversions
 src/rudy/defs.d         def! templates + extern(C) trampolines
 src/rudy/typeddata.d    RudyTypedData mixin: wrap D structs as Ruby objects
 src/dextest.d           acceptance-test extension (old "dexter" revived)
+src/dexitest.d          missing-API bindings acceptance extension
 src/dtypetest.d         typed-data acceptance extension
 test/run.rb             Ruby-side acceptance suite (17 assertions)
+test/exitest.rb         bindings acceptance suite (31 assertions)
 test/typedtest.rb       typed-data acceptance suite (9 assertions)
 ```
 
@@ -133,8 +174,8 @@ functions (`rb_string_value_ptr`, `rb_float_value`, `rb_ary_entry`, ...).
 ## Build & test
 
 ```sh
-make        # builds .build/dextest.so and .build/dtypetest.so
-make test   # runs test/run.rb + test/typedtest.rb against the builds
+make        # builds .build/dextest.so, .build/dexitest.so and .build/dtypetest.so
+make test   # runs test/run.rb + test/exitest.rb + test/typedtest.rb (55 assertions)
 ```
 
 The Makefile finds Ruby via `ruby -e` hdrdir/libdir queries (works with

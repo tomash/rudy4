@@ -17,6 +17,8 @@ import rudy.bind.value;
 import rudy.convert;
 import std.traits;
 import std.string : toStringz;
+import std.array : join;
+import std.conv : to;
 
 private:
 
@@ -75,20 +77,113 @@ VALUE rudy_trampoline_3(alias fn)(VALUE self, VALUE a1, VALUE a2, VALUE a3)
             fn(d_type!(P[0])(a1), d_type!(P[1])(a2), d_type!(P[2])(a3)));
 }
 
+// ------------------------------------------------------------------
+// Variadic trampoline: argc/argv style (registered with arity -1).
+// Instantiated only when fn has D default arguments; each missing
+// argument is substituted with its declared default value.
+// ------------------------------------------------------------------
+
+// Strip leading `void` entries (params without D defaults) off a
+// ParameterDefaults tuple; the count of stripped voids = required
+// arguments. Alias-slicing only — arithmetic recursion on an
+// eponymous enum is a circular reference under GDC-14.
+private template shrinkVoids(D...)
+{
+    static if (D.length > 0 && is(D[0] == void))
+        alias shrinkVoids = shrinkVoids!(D[1 .. $]);
+    else
+        alias shrinkVoids = D;
+}
+
+extern(C)
+VALUE rudy_trampoline_var(alias fn)(int argc, const(VALUE)* argv, VALUE self)
+{
+    alias P = Parameters!(typeof(&fn));
+    enum total = P.length;
+    alias DEFAULTS = ParameterDefaults!(fn);   // AliasSeq: void where none
+
+    // how many params lack defaults (must all be supplied)
+    enum required = total - shrinkVoids!DEFAULTS.length;
+
+    if (argc < required || argc > total)
+    {
+        const(char)* expect = required == total ? toStringz("".dup)
+                           : (required == 0 ? toStringz("0..") : toStringz(""));
+        rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected %s%d)",
+                 argc, expect, total);
+    }
+
+    // Unwrap supplied args, then substitute declared defaults for the
+    // rest — static foreach resolves each index at compile time
+    // (GDC-14 rejects runtime-indexed static-if on tuples).
+    P args;                                   // default-initialized
+    static foreach (j; 0 .. total)
+    {
+        static if (is(DEFAULTS[j] == void))   // mandatory: always from argv
+        {
+            static if (rudyArg!(P[j]))        // Raw!T: wrap raw bits
+                args[j] = P[j](argv[j]);
+            else
+                args[j] = d_type!(P[j])(argv[j]);
+        }
+        else                                   // optional: argv or default
+        {
+            if (argc > j)
+            {
+                static if (rudyArg!(P[j]))
+                    args[j] = P[j](argv[j]);
+                else
+                    args[j] = d_type!(P[j])(argv[j]);
+            }
+            else
+            {
+                static if (is(DEFAULTS[j] == VALUE))
+                    args[j] = cast(VALUE) DEFAULTS[j];
+                else
+                    args[j] = DEFAULTS[j];
+            }
+        }
+    }
+
+    // call fn with all `total` args — the tuple expands into the call
+    return to_ruby_value(fn(args));
+}
+
 /// Picks the right trampoline instantiation for fn's parameter count.
 template rudy_trampoline(alias fn)
 {
     alias P = Parameters!(typeof(&fn));
-    static if (P.length == 0)      alias rudy_trampoline = rudy_trampoline_0!(fn);
+    enum hasDefaults = hasDefaultArgs!(fn);
+    static if (hasDefaults)         alias rudy_trampoline = rudy_trampoline_var!(fn);
+    else static if (P.length == 0)  alias rudy_trampoline = rudy_trampoline_0!(fn);
     else static if (P.length == 1) alias rudy_trampoline = rudy_trampoline_1!(fn);
     else static if (P.length == 2) alias rudy_trampoline = rudy_trampoline_2!(fn);
     else static if (P.length == 3) alias rudy_trampoline = rudy_trampoline_3!(fn);
-    else static assert(0, "def!: only 0..3 arguments supported so far");
+    else static assert(0, "def!: only 0..3 arguments (or defaults) supported");
 }
 
-/// Registered arity for Ruby: number of declared parameters (no optionals
-/// handling yet — variadic D functions with default args are not inspected).
-enum rudy_arity(alias fn) = Parameters!(typeof(&fn)).length;
+/// true if any parameter of fn has a D default value
+template hasDefaultArgs(alias fn)
+{
+    alias D = ParameterDefaults!(fn);
+    enum bool hasDefaultArgs = hasDefaultArgsImpl!D;
+}
+
+private template hasDefaultArgsImpl(D...)
+{
+    static if (D.length == 0)
+        enum bool hasDefaultArgsImpl = false;
+    else static if (!is(D[0] == void))
+        enum bool hasDefaultArgsImpl = true;
+    else
+        enum bool hasDefaultArgsImpl = hasDefaultArgsImpl!(D[1 .. $]);
+}
+
+/// Registered arity for Ruby: fixed count for fixed-arity functions;
+/// -1 (argc/argv style) when defaults are in play.
+enum int rudy_arity(alias fn) = hasDefaultArgs!(fn)
+    ? -1
+    : cast(int) Parameters!(typeof(&fn)).length;
 
 // ------------------------------------------------------------------
 // def! — the public interface
