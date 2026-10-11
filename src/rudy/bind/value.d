@@ -46,7 +46,6 @@ VALUE rb_define_class(const(char)* name, VALUE superclass);
 VALUE rb_define_module(const(char)* name);
 VALUE rb_define_class_under(VALUE outer, const(char)* name, VALUE superclass);
 VALUE rb_define_module_under(VALUE outer, const(char)* name);
-VALUE rb_define_method_under(VALUE klass, const(char)* name, AnyMethod func, int argc);
 void  rb_extend_object(VALUE mod);
 void  rb_define_method(VALUE klass, const(char)* name, AnyMethod func, int argc);
 void  rb_define_module_function(VALUE mod, const(char)* name, AnyMethod func, int argc);
@@ -89,7 +88,6 @@ VALUE rb_Integer(VALUE);
 // strings
 VALUE rb_str_new(const(char)* ptr, long len);
 VALUE rb_str_new_cstr(const(char)* ptr);
-VALUE rb_str_new2(const(char)* ptr);          // alias of rb_str_new_cstr
 VALUE rb_str_dup(VALUE);
 void  rb_str_modify(VALUE);
 VALUE rb_str_cat(VALUE str, const(char)* ptr, long len);
@@ -112,7 +110,6 @@ VALUE rb_ary_new_from_values(C_long n, const(VALUE)* vals);
 VALUE rb_ary_push(VALUE ary, VALUE item);
 VALUE rb_ary_entry(VALUE ary, long offset);
 VALUE rb_ary_store(VALUE ary, long idx, VALUE item);
-long  rb_ary_size(VALUE);
 VALUE rb_ary_join(VALUE ary, VALUE sep);
 VALUE rb_ary_to_s(VALUE ary);
 VALUE rb_obj_class(VALUE obj);
@@ -122,8 +119,6 @@ VALUE rb_hash_new();
 VALUE rb_hash_aset(VALUE hash, VALUE key, VALUE val);
 VALUE rb_hash_aref(VALUE hash, VALUE key);
 size_t rb_hash_size(VALUE hash);
-VALUE rb_hash_keys(VALUE hash);
-VALUE rb_hash_values(VALUE hash);
 
 // ivars / constants
 VALUE rb_iv_get(VALUE obj, const(char)* name);
@@ -156,7 +151,7 @@ void  rb_exc_raise(VALUE exc);
 // inspect what Ruby raised while crossing the boundary.
 VALUE rb_errinfo();
 void  rb_set_errinfo(VALUE err);
-int   rb_check_arity(int argc, int min, int max);
+// int rb_check_arity(int argc, int min, int max); -- inline-only in ruby/internal/intern/error.h, NOT exported; keep out of bindings
 
 // GC
 void  rb_gc_register_address(VALUE* address);
@@ -219,7 +214,7 @@ alias void function(void* ptr) RUBY_DATA_FUNC_MARK;
 alias void function(void* ptr) RUBY_DATA_FUNC_FREE;
 VALUE rb_data_object_wrap(VALUE klass, void* ptr,
                           RUBY_DATA_FUNC_MARK mark, RUBY_DATA_FUNC_FREE free);
-void* rb_data_object_get(VALUE obj);
+// void* rb_data_object_get(VALUE obj); -- inline-only in ruby/internal/core/rdata.h, NOT exported (use typeddata helper)
 
 // typed-data (rb_data_object_get is an inline macro; these are real
 // exported functions — see rudy/typeddata.d for a D-friendly helper)
@@ -254,7 +249,7 @@ extern __gshared VALUE rb_eKeyError;
 extern __gshared VALUE rb_eIndexError;
 extern __gshared VALUE rb_eLoadError;
 extern __gshared VALUE rb_eSystemExit;
-extern __gshared VALUE rb_eSystemStackError;
+extern __gshared VALUE rb_eSysStackError;    // Ruby 4 exports rb_eSysStackError (rb_eSystemStackError never existed)
 extern __gshared VALUE rb_eZeroDivError;
 
 // type tags (ruby_value_type) — subset rudy needs

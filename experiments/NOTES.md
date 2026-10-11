@@ -79,6 +79,30 @@ Six torture tests, all passing (`make exp-test`):
     mixin; a leftover duplicate plain `mixin RudyTypedData!(...)` line caused
     conflicting-symbol compile errors and was removed).
 
+## ABI conformance audit (scripts/abi_audit.sh)
+
+`scripts/abi_audit.sh` diffs the `extern(C)` declarations in
+`rudy/bind/value.d` against the symbols exported by libruby (via `nm -D`).
+It fails CI on any *bound-but-not-exported* symbol. Names only — widths
+and signatures (the `rb_int2inum` int-vs-`C_long` bug class) must still be
+checked against `ruby.h` by hand; `nm` cannot see types.
+
+First run (2026-10-11, ruby 4.0.7) found 8 phantom declarations, all unused:
+
+- `rb_eSystemStackError` — **never existed**; the symbol is
+  `rb_eSysStackError` (real misbind, the audit's first catch)
+- `rb_define_method_under` — invented; no such API
+- `rb_ary_size`, `rb_hash_keys`, `rb_hash_values` — inline/macro-only in
+  headers (`RARRAY_LEN` etc.), never exported
+- `rb_str_new2` — `#define rb_str_new2 rb_str_new_cstr`; bind the latter
+- `rb_check_arity`, `rb_data_object_get` — inline-only in
+  `ruby/internal/*`, not callable from a separately-linked `.so`
+
+All eight removed from `value.d` (kept as comments where the API still
+matters). Post-fix: **126 bound, 0 misbinds, 1410 unbound** (see
+`.build/abi_audit/unbound.txt` for the full unbound ledger — includes lots
+of internal/underscore names that are not for extension use).
+
 ## API gaps worth adding to the library
 
 Verified exported by libruby but **not yet bound** in `rudy/bind/value.d`:
