@@ -35,6 +35,23 @@ require "myext"
 add_five(37)   # => 42
 ```
 
+Compile the extension into a `myext.so` Ruby can `require` (here `myext.d`
+lives next to a `src/` tree with the library):
+
+```sh
+gdc -shared -o myext.so \
+  -fPIC -Isrc \
+  $(ruby -e 'print RbConfig::CONFIG["rubyhdrdir"]') \
+  $(ruby -e 'print RbConfig::CONFIG["rubyarchhdrdir"]') \
+  src/rudy/*.d src/rudy/bind/*.d myext.d \
+  $(ruby -e 'print RbConfig::CONFIG["LIBRUBYARG_SHARED"]') \
+  -Wl,-rpath,$(ruby -e 'print RbConfig::CONFIG["libdir"]') -lm
+```
+
+or just `make` with this repo's Makefile, which does the same (header dirs,
+`libruby` and rpath are pulled from `RbConfig`), builds `dextest.so` from
+`src/dextest.d`, and `make test` runs the acceptance suite.
+
 Arguments arrive as raw `VALUE`s and are converted to the declared D
 parameter types (`long`, `double`, `string`, `bool`, ...); the return
 value is converted back. No `Data_Wrap_Struct`, no struct access, no
