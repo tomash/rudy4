@@ -13,8 +13,11 @@ Three torture tests, all passing (`make exp-test`):
 1. **`rb_data_object_get` is an inline C macro, not an exported symbol.**
    Can't be called from D. Fix in `exp_wrap`: D-side registry
    (`Matrix*[ulong]` keyed by `rb_obj_id`, reverse map, cleaned in the free
-   callback). This is the main missing-API finding: rudy should ship a
-   typed-data helper (wrap + unwrap + registry) as library code.
+   callback). Library fix shipped: `rudy/typeddata.d` — a TypedData helper
+   (`RudyTypedData!(T, "name")` mixin: `name_type` descriptor,
+   `name_wrap`, `name_get` via `rb_data_typed_object_wrap` /
+   `rb_check_typeddata`), acceptance-tested in `src/dtypetest.d` +
+   `test/typedtest.rb` (9 assertions, incl. 100k-cycle GC stress).
 
 2. **`VALUE` is aliased to `ulong` → `def!` raw-passthrough defeats `d_type`.**
    In `rudy/defs.d`, `is(P[i] == VALUE)` exists so D funcs taking raw VALUEs
@@ -47,8 +50,9 @@ Verified exported by libruby but **not yet bound** in `rudy/bind/value.d`:
   block plumbing at all)
 - `rb_rescue`, `rb_ensure` — structured exception handling from D (only
   `rb_protect` is bound today)
-- `rb_check_typeddata`, `rb_data_object_zalloc`, `rb_data_typed_object_wrap`
-  — typed-data counterpart to finding #1
+- ~~`rb_check_typeddata`, `rb_data_object_zalloc`, `rb_data_typed_object_wrap`~~
+  — bound in `rudy/bind/value.d` + `RudyTypedData` helper in `rudy/typeddata.d`
+  (see finding 1)
 - `rb_define_singleton_method` — needed for per-object methods, not just
   module/class methods
 - GVL/GC APIs: `rb_thread_call_without_gvl`, `rb_thread_call_without_gvl2`

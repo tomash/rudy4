@@ -54,13 +54,45 @@ or just `make` with this repo's Makefile, which does the same (header dirs,
 
 Arguments arrive as raw `VALUE`s and are converted to the declared D
 parameter types (`long`, `double`, `string`, `bool`, ...); the return
-value is converted back. No `Data_Wrap_Struct`, no struct access, no
-manual `rb_num2long` boilerplate — the trampoline does it.
+value is converted back. No manual `rb_num2long` boilerplate — the
+trampoline does it.
 
-Supported D parameter types: `bool`, `int`/`uint`/`long`/`long` (`C_long`
+Supported D parameter types: `bool`, `int`/`uint`/`long`/`ulong` (`C_long`
 aliases follow the platform), `double`, `string` (copied via `idup`),
 static and dynamic arrays, and hashes (AAs). Return types: all of the
 above plus `cdouble`/`creal` (mapped to Ruby `Complex` via `rb_funcallv`).
+
+## Wrapping D structs: `RudyTypedData`
+
+`def!` converts *arguments*, but sometimes you want the D struct itself to
+*be* a Ruby object (stateful objects, not just pure functions). The old
+`Data_Wrap_Struct` path needs `rb_data_object_get`, which is an inline C
+macro — uncallable from D. The TypedData API avoids that entirely:
+
+```d
+import rudy.typeddata;
+
+struct Matrix { size_t rows, cols; double* data; }
+
+mixin RudyTypedData!(Matrix, "matrix");
+// generates: matrix_type (rb_data_type_t descriptor),
+//            matrix_wrap(VALUE klass, Matrix*),
+//            matrix_get(VALUE obj)   // raises TypeError on wrong type
+
+extern(C) VALUE matrix_alloc(VALUE klass)
+{
+    import core.stdc.stdlib : calloc;
+    return matrix_wrap(klass, cast(Matrix*) calloc(1, Matrix.sizeof));
+}
+```
+
+The mixin generates the descriptor (dfree defaults to `free()` for
+malloc'd structs; pass `&rudy_typed_nofree` for D-GC-owned memory, or any
+custom `extern(C) void function(void*)` for cleanup). `matrix_get` uses
+`rb_check_typeddata`, so unwrapping a non-Matrix raises `TypeError` — no
+D-side registry needed. Full example (alloc func, `initialize`, `[]`/
+`[]=`, `det`, `to_a`, 100k-object GC stress): `src/dtypetest.d`, suite:
+`test/typedtest.rb` (9 assertions).
 
 ## Layout
 
@@ -68,8 +100,11 @@ above plus `cdouble`/`creal` (mapped to Ruby `Complex` via `rb_funcallv`).
 src/rudy/bind/value.d   hand-written binding to the Ruby 4.0 C API
 src/rudy/convert.d      to_ruby_value!(T) / d_type!(T) conversions
 src/rudy/defs.d         def! templates + extern(C) trampolines
+src/rudy/typeddata.d    RudyTypedData mixin: wrap D structs as Ruby objects
 src/dextest.d           acceptance-test extension (old "dexter" revived)
+src/dtypetest.d         typed-data acceptance extension
 test/run.rb             Ruby-side acceptance suite (17 assertions)
+test/typedtest.rb       typed-data acceptance suite (9 assertions)
 ```
 
 `src/rudy/bind/value.d` is deliberately **not** generated: the modern Ruby
@@ -87,8 +122,8 @@ functions (`rb_string_value_ptr`, `rb_float_value`, `rb_ary_entry`, ...).
 ## Build & test
 
 ```sh
-make        # builds .build/dextest.so
-make test   # runs test/run.rb against the built extension
+make        # builds .build/dextest.so and .build/dtypetest.so
+make test   # runs test/run.rb + test/typedtest.rb against the builds
 ```
 
 The Makefile finds Ruby via `ruby -e` hdrdir/libdir queries (works with
