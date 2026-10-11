@@ -1,0 +1,7 @@
+.build/
+*.so
+*.o
+*.d.o
+dextest_gem-*.gem
+.bundle/
+tmp/
