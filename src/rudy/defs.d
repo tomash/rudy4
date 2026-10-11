@@ -121,8 +121,8 @@ VALUE rudy_trampoline_var(alias fn)(int argc, const(VALUE)* argv, VALUE self)
     {
         static if (is(DEFAULTS[j] == void))   // mandatory: always from argv
         {
-            static if (is(P[j] == VALUE))
-                args[j] = argv[j];
+            static if (rudyArg!(P[j]))        // Raw!T: wrap raw bits
+                args[j] = P[j](argv[j]);
             else
                 args[j] = d_type!(P[j])(argv[j]);
         }
@@ -130,8 +130,8 @@ VALUE rudy_trampoline_var(alias fn)(int argc, const(VALUE)* argv, VALUE self)
         {
             if (argc > j)
             {
-                static if (is(P[j] == VALUE))
-                    args[j] = argv[j];
+                static if (rudyArg!(P[j]))
+                    args[j] = P[j](argv[j]);
                 else
                     args[j] = d_type!(P[j])(argv[j]);
             }
