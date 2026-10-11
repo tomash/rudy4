@@ -12,6 +12,33 @@ import std.exception : enforce;
 
 // ---------------------------------------------------------------- helpers
 
+/// Opt-in raw-VALUE passthrough for def!'d function parameters.
+///
+///     VALUE identity(VALUE v) ...  -> DECODED as ulong (VALUE is aliased
+///     to ulong, and d_type now decodes it instead of passing the raw
+///     tagged pointer through).
+///
+///     Raw!VALUE identity(Raw!VALUE v) ... -> raw, untouched VALUE.
+///
+/// Rationale: VALUE is `alias ulong VALUE`, so "parameter is VALUE" can't
+/// be detected as a distinct type — and a plain `ulong` param used to hit
+/// the old raw-passthrough branch, receiving the TAGGED value (Ruby 5
+/// arrived as 11). Passthrough is now explicit: wrap in Raw!(...) to say
+/// "give me the bits untouched".
+struct Raw(T)
+{
+    T value;
+}
+
+/// Compile-time check: is T the Raw!(...) passthrough wrapper?
+template isRaw(T)
+{
+    static if (is(T == Raw!R, R))
+        enum isRaw = true;
+    else
+        enum isRaw = false;
+}
+
 /// Type traits the old rudy/ replaced its meta/ directory for.
 template isDynamicArrayType(T)  { enum bool isDynamicArrayType = isDynamicArray!T; }
 template isStaticArrayType(T)   { enum bool isStaticArrayType = isStaticArray!T; }
@@ -32,7 +59,8 @@ VALUE to_ruby_value(T)(T t)
 {
     static if (is(T == VALUE))       // raw passthrough — already a VALUE
         return t;
-
+    else static if (isRaw!T)               // Raw!VALUE -> pass bits through
+        return t.value;
     else static if (is(T == bool))
         return t ? Qtrue_ : Qfalse_;
 
@@ -102,6 +130,12 @@ T d_type(T)(VALUE val)
         return ptr[0 .. len].idup;
     }
 
+    else static if (is(T : C_ulonglong) || is(T == ulong))
+        return cast(T) rb_num2ulong(val);  // VALUE is aliased to ulong;
+                                           // a ulong param still means
+                                           // "Ruby Integer -> machine word",
+                                           // NOT raw passthrough
+
     else static if (is(T : C_longlong))  return cast(T) rb_num2ll(val);
     else static if (is(T : C_long))      return cast(T) rb_num2long(val);
     else static if (is(T : int))         return cast(T) rb_num2long(val);
@@ -113,6 +147,9 @@ T d_type(T)(VALUE val)
     else static assert(0, "d_type: no conversion to " ~ T.stringof);
 }
 
+/// NB: D's uninitialized `double x;` is NaN (float.init), NOT 0.0 as in C.
+/// Always explicitly initialize double accumulators: `double x = 0.0;` —
+/// otherwise every sum silently becomes NaN (issue #3).
 
 /// Raise a Ruby exception from D.
 void rudy_raise(VALUE exc, string msg)

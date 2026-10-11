@@ -27,6 +27,19 @@ private:
 // One is instantiated per (function, arity) pair at def!() time.
 // ------------------------------------------------------------------
 
+// Parameter conversion policy: Raw!T params pass the incoming VALUE
+// through untouched (opt-in); every other type — including ulong, which
+// VALUE is aliased to — is decoded via d_type!T. The old behavior (any
+// VALUE-typed param = raw passthrough) silently swallowed ulong params,
+// feeding them TAGGED values (Ruby 5 arrived as 11): see issue #1.
+template rudyArg(P)
+{
+    static if (isRaw!P)
+        enum rudyArg = true;    // pass raw VALUE
+    else
+        enum rudyArg = false;   // decode with d_type!P
+}
+
 extern(C)
 VALUE rudy_trampoline_0(alias fn)()
 {
@@ -37,8 +50,8 @@ extern(C)
 VALUE rudy_trampoline_1(alias fn)(VALUE self, VALUE a1)
 {
     alias P = Parameters!(fn);
-    static if (is(P[0] == VALUE))                 // raw VALUE passthrough
-        return to_ruby_value(fn(a1));
+    static if (rudyArg!(P[0]))   // Raw!T — opt-in raw VALUE passthrough
+        return to_ruby_value(fn(P[0](a1)));
     else
         return to_ruby_value(fn(d_type!(P[0])(a1)));
 }
@@ -47,8 +60,8 @@ extern(C)
 VALUE rudy_trampoline_2(alias fn)(VALUE self, VALUE a1, VALUE a2)
 {
     alias P = Parameters!(fn);
-    static if (is(P[0] == VALUE) && is(P[1] == VALUE))
-        return to_ruby_value(fn(a1, a2));
+    static if (rudyArg!(P[0]) && rudyArg!(P[1]))   // Raw!T params: passthrough
+        return to_ruby_value(fn(P[0](a1), P[1](a2)));
     else
         return to_ruby_value(fn(d_type!(P[0])(a1), d_type!(P[1])(a2)));
 }
@@ -57,8 +70,8 @@ extern(C)
 VALUE rudy_trampoline_3(alias fn)(VALUE self, VALUE a1, VALUE a2, VALUE a3)
 {
     alias P = Parameters!(fn);
-    static if (is(P[0] == VALUE) && is(P[1] == VALUE) && is(P[2] == VALUE))
-        return to_ruby_value(fn(a1, a2, a3));
+    static if (rudyArg!(P[0]) && rudyArg!(P[1]) && rudyArg!(P[2]))
+        return to_ruby_value(fn(P[0](a1), P[1](a2), P[2](a3)));
     else
         return to_ruby_value(
             fn(d_type!(P[0])(a1), d_type!(P[1])(a2), d_type!(P[2])(a3)));

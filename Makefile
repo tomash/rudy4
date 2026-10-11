@@ -20,9 +20,9 @@ DC_SRCS := $(wildcard src/rudy/*.d src/rudy/bind/*.d)
 
 EXP_SRCS := exp_wrap exp_cross exp_perf
 
-.PHONY: all clean test check exp exp-test
+.PHONY: all clean test check typed-test exp exp-test
 
-all: .build/dextest.so .build/dexitest.so
+all: .build/dextest.so .build/dexitest.so .build/dtypetest.so
 
 # One shared object: the rudy library modules + the extension entry point.
 .build/dextest.so: $(DC_SRCS) src/dextest.d | .build
@@ -33,6 +33,11 @@ all: .build/dextest.so .build/dexitest.so
 # GVL bindings + variadic def! (D default args -> Ruby optional args).
 .build/dexitest.so: $(DC_SRCS) src/dexitest.d | .build
 	$(GDC) -shared -o $@ $(DFLAGS) $(DC_SRCS) src/dexitest.d \
+	  -L$(LIBRUBY_DIR) $(LIBRUBYARG) -lm
+
+# TypedData extension: rudy library + typeddata helper + dtypetest entry point.
+.build/dtypetest.so: $(DC_SRCS) src/dtypetest.d | .build
+	$(GDC) -shared -o $@ $(DFLAGS) $(DC_SRCS) src/dtypetest.d \
 	  -L$(LIBRUBY_DIR) $(LIBRUBYARG) -lm
 
 .build:
@@ -54,6 +59,7 @@ exp-test: exp
 test: all
 	$(RUBY) test/run.rb
 	$(RUBY) test/exitest.rb
+	$(RUBY) test/typedtest.rb
 
 check: test
 

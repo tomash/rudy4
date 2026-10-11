@@ -10,21 +10,22 @@ Three torture tests, all passing (`make exp-test`):
 
 ## Bugs found by the torture tests (and fixes)
 
-1. **`rb_data_object_get` is an inline C macro, not an exported symbol.**
+1. **`VALUE` is aliased to `ulong` → `def!` raw-passthrough swallows `ulong` params.**
+   **FIXED** (issue #1): in `rudy/defs.d`, `is(P[i] == VALUE)` used to pass the
+   raw tagged VALUE to any `ulong` param (Ruby `5` arrived as `11`; fib(28)
+   silently computed F(57)). Passthrough is now opt-in via `Raw!T` params;
+   plain `ulong` params decode via `d_type!ulong` (rb_num2ulong). Regression
+   tests: `identity_ulong`, `double_it_ulong`, `raw_value_id` in the
+   acceptance suite (test/run.rb).
+
+2. **`rb_data_object_get` is an inline C macro, not an exported symbol.**
    Can't be called from D. Fix in `exp_wrap`: D-side registry
    (`Matrix*[ulong]` keyed by `rb_obj_id`, reverse map, cleaned in the free
-   callback). This is the main missing-API finding: rudy should ship a
-   typed-data helper (wrap + unwrap + registry) as library code.
-
-2. **`VALUE` is aliased to `ulong` → `def!` raw-passthrough defeats `d_type`.**
-   In `rudy/defs.d`, `is(P[i] == VALUE)` exists so D funcs taking raw VALUEs
-   work — but since `VALUE == ulong`, any D function with a `ulong` parameter
-   gets the **tagged** VALUE passed through untouched (Ruby `5` arrives as
-   `11`). This silently corrupted `perf_fib(ulong)` (fib(28) was actually
-   computing F(57) — looked like a hang, was just astronomically slow).
-   Workaround: take `long` (or any non-VALUE type) so `d_type` decodes.
-   Library fix: make raw-passthrough opt-in (distinct `TypedValue` type or a
-   `Raw` wrapper struct) instead of triggering on the alias.
+   callback). Library fix shipped: `rudy/typeddata.d` — a TypedData helper
+   (`RudyTypedData!(T, "name")` mixin: `name_type` descriptor,
+   `name_wrap`, `name_get` via `rb_data_typed_object_wrap` /
+   `rb_check_typeddata`), acceptance-tested in `src/dtypetest.d` +
+   `test/typedtest.rb` (9 assertions, incl. 100k-cycle GC stress).
 
 3. **Uninitialized `double x;` in D is NaN** — not 0.0. Hit this **three
    separate times** (`det`, `cross_sum`, `perf_build total`): any `double`
@@ -47,8 +48,9 @@ Verified exported by libruby but **not yet bound** in `rudy/bind/value.d`:
   block plumbing at all)
 - `rb_rescue`, `rb_ensure` — structured exception handling from D (only
   `rb_protect` is bound today)
-- `rb_check_typeddata`, `rb_data_object_zalloc`, `rb_data_typed_object_wrap`
-  — typed-data counterpart to finding #1
+- ~~`rb_check_typeddata`, `rb_data_object_zalloc`, `rb_data_typed_object_wrap`~~
+  — bound in `rudy/bind/value.d` + `RudyTypedData` helper in `rudy/typeddata.d`
+  (see finding 1)
 - `rb_define_singleton_method` — needed for per-object methods, not just
   module/class methods
 - GVL/GC APIs: `rb_thread_call_without_gvl`, `rb_thread_call_without_gvl2`

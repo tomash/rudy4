@@ -210,6 +210,15 @@ VALUE rb_data_object_wrap(VALUE klass, void* ptr,
                           RUBY_DATA_FUNC_MARK mark, RUBY_DATA_FUNC_FREE free);
 void* rb_data_object_get(VALUE obj);
 
+// typed-data (rb_data_object_get is an inline macro; these are real
+// exported functions — see rudy/typeddata.d for a D-friendly helper)
+// NOTE: RbDataType (rb_data_type_t) is defined in rudy/typeddata.d to keep
+// this raw binding free of struct definitions; cast accordingly.
+alias size_t function(const void*) RUBY_DATA_FUNC_DSIZE;
+VALUE rb_data_typed_object_wrap(VALUE klass, void* ptr, in void* data_type);
+void* rb_check_typeddata(VALUE obj, in void* data_type);
+void* rb_data_typed_object_zalloc(VALUE klass, in void* data_type);
+
 // ---------------------------------------------------------------- globals
 
 extern __gshared VALUE rb_cObject;
