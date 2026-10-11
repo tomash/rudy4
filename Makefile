@@ -57,6 +57,7 @@ exp-test: exp
 	$(RUBY) experiments/test_exp_http.rb
 	$(RUBY) experiments/test_exp_gcstorm.rb
 	$(RUBY) experiments/test_exp_exc.rb
+	$(RUBY) experiments/test_exp_compact.rb
 
 # Ruby-side acceptance suite (dexter revival + missing-API bindings)
 test: all

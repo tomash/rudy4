@@ -1,6 +1,6 @@
 # Experiments — Findings & Notes
 
-Six torture tests, all passing (`make exp-test`):
+Seven torture tests, all passing (`make exp-test`):
 
 | # | Experiment | What it tortures |
 |---|------------|------------------|
@@ -10,6 +10,7 @@ Six torture tests, all passing (`make exp-test`):
 | 4 | `exp_http` | GVL-released blocking I/O: a hand-written TCP server loop in pure D running with the GVL released (`rb_thread_call_without_gvl`), D thread writing to a Ruby `Queue`, `rb_syserr_new` from `errno`, two Ruby threads hammering the server concurrently (11 assertions) |
 | 5 | `exp_gcstorm` | GC storm at the D↔Ruby seam: 48,100 malloc'd TypedData wrappers crossing the boundary while a D churn thread allocates and `GC.collect()`s in a loop; exact free-count accounting, alloc/free balance == 0 (no leak, no double free), idempotent churn control (9 assertions) |
 | 6 | `exp_exc` | Exception ping-pong: `rb_rescue`/`rb_ensure`/nested `rb_protect`, 50-level D↔Ruby mutual recursion with a raise at the bottom and rescue at the top, `rb_exc_raise` re-raising the *same* exception VALUE (identity check), all D-side counters intact after every longjmp unwind (19 assertions) |
+| 7 | `exp_compact` | GC compaction vs wrapped structs and registered globals: `GC.compact` moves ~1.4k objects while TypedData wrappers hold references to them. Negative control (no callbacks) collects referents and crashes the VM; guarded wrapper (`dmark`=`rb_gc_mark_movable` + `dcompact`=`rb_gc_location` rewrite) survives with identity preserved. Registered globals via `rb_gc_register_address` + `rb_gc_location` refresh (8 assertions + subprocess witness) |
 
 ## Bugs found by the torture tests (and fixes)
 
@@ -74,10 +75,31 @@ Six torture tests, all passing (`make exp-test`):
     does nothing — `name_wrap` still wraps with the original descriptor, so
     a custom free callback was never invoked (free_count stayed 0 while the
     storm ran). Fix: the mixin takes the free callback as an optional third
-    template parameter — `mixin RudyTypedData!(StormCell, "stormcell",
+    template parameter — `    mixin RudyTypedData!(StormCell, "stormcell",
     &stormcell_free);` (the free function must be declared before the
     mixin; a leftover duplicate plain `mixin RudyTypedData!(...)` line caused
     conflicting-symbol compile errors and was removed).
+
+11. **A wrapped struct holding live VALUEs with no `dmark` lets Ruby's GC
+    collect the referents while the wrapper is alive** (exp_compact). Even
+    a *compaction-only* stress exposes it: after `GC.compact`, reading a
+    surviving unguarded box returned a `Module` and an unrelated
+    `String` ("VariableNameChecker") — freed VALUE slots reused by other
+    objects. Under GC.start+compact+churn the dangling VALUE is worse than
+    garbage: `read_box` segfaults (`id_table_lookup` on a dangling VALUE →
+    SIGSEGV) or glibc-aborts (`free(): invalid pointer`).
+    **Fix: the `RudyTypedData` mixin now takes optional mark/compact
+    callbacks** (`mixin RudyTypedData!(BoxCell, "gboxcell", &rudy_typed_free,
+    &boxcell_mark, &boxcell_compact);`) wired into the descriptor's
+    `d_mark`/`d_compact`. The movable-objects protocol: mark with
+    `rb_gc_mark_movable` (NOT `rb_gc_mark`, which pins the referent and
+    defeats compaction), rewrite references in the compact callback with
+    `rb_gc_location`. Verified: guarded boxes keep referents alive and
+    identical (same `object_id`) across full GCs + compactions + churn.
+    Bonus finding: **fork() is not safe with a dlopen'd D .so** — the
+    child's abort poisoned the parent too (D runtime state does not
+    survive fork); the corruption witness therefore runs as a re-exec'd
+    subprocess (`system()`), not `fork()`.
 
 ## ABI conformance audit (scripts/abi_audit.sh)
 
@@ -129,11 +151,13 @@ Newly bound for the torture experiments (all in `rudy/bind/value.d`):
   said `int`; it silently worked through register reuse but is now `C_long`
 - `rb_errinfo` / `rb_set_errinfo` — inspect/clear Ruby's current exception
   state from D (used by exp_exc's nested-protect torture)
+- `rb_gc_location`, `rb_gc_mark`, `rb_gc_mark_movable`, `rb_gc_register_address`,
+  `rb_gc_unregister_address` — GC rooting/movable-objects protocol (exp_compact;
+  see finding 11)
 
 Still missing / future work:
 
 - `rb_yield` family beyond what's bound; `rb_block_call` with data
-- TypedData mark callbacks (no D-side write barrier integration yet)
 
 ## Perf observations (Ruby 4.0.7, GDC-14, -O2)
 

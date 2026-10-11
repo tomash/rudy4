@@ -156,6 +156,9 @@ void  rb_set_errinfo(VALUE err);
 // GC
 void  rb_gc_register_address(VALUE* address);
 void  rb_gc_unregister_address(VALUE* address);
+VALUE rb_gc_location(VALUE);   // remap a VALUE after GC.compact moved it
+void  rb_gc_mark(VALUE);        // conservative mark (no compaction update)
+void  rb_gc_mark_movable(VALUE); // mark + this slot is updated via rb_gc_location in dcompact
 VALUE rb_gc_enable();
 VALUE rb_gc_disable();
 

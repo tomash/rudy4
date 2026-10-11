@@ -89,9 +89,28 @@ extern (C) void rudy_typed_free(void* p)
 /// models (default: malloc'd → rudy_typed_free; use &rudy_typed_nofree for
 /// D-GC-owned structs).
 ///
+/// EXPERIMENT 7 (exp_compact) — finding #11: if the wrapped struct holds
+/// live VALUEs and the descriptor has no dmark, the referents are
+/// collectible while the wrapper is still alive: use-after-free (observed
+/// as a garbage String read back from a freed-and-reused slot). If the
+/// struct holds VALUEs, ALSO pass mark/compact callbacks:
+///
+///     extern (C) void mycell_mark(void* p)
+///     { rb_gc_mark_movable((cast(MyCell*) p).embedded); }
+///     extern (C) void mycell_compact(void* p)
+///     { auto c = cast(MyCell*) p; c.embedded = rb_gc_location(c.embedded); }
+///     mixin RudyTypedData!(MyCell, "mycell", &rudy_typed_free,
+///                          &mycell_mark, &mycell_compact);
+///
+/// dmark uses rb_gc_mark_movable and dcompact rewrites the slot via
+/// rb_gc_location — the movable-objects protocol required by GC.compact.
+///
 /// NB: the generated identifiers need string mixins — D template parameters
 /// do NOT become identifier names in a plain mixin template body.
-template RudyTypedData(T, string name, RUBY_DATA_FUNC_FREE freeFunc = &rudy_typed_free)
+template RudyTypedData(T, string name,
+                      RUBY_DATA_FUNC_FREE freeFunc = &rudy_typed_free,
+                      RUBY_DATA_FUNC_MARK markFunc = null,
+                      RUBY_DATA_FUNC_MARK compactFunc = null)
 {
     private enum cname = name ~ "\0";     // NUL-terminated, static storage
 
@@ -104,7 +123,7 @@ template RudyTypedData(T, string name, RUBY_DATA_FUNC_FREE freeFunc = &rudy_type
         // The descriptor. Must outlive every wrapped object.
         "__gshared RbDataType " ~ name ~ "_type = RbDataType(" ~
         "    cname.ptr," ~
-        "    RbDataFunction(null, freeFunc, &" ~ name ~ "_dsize, null, [null])," ~
+        "    RbDataFunction(markFunc, freeFunc, &" ~ name ~ "_dsize, compactFunc, [null])," ~
         "    null," ~                      // parent
         "    null," ~                      // data
         "    0);" ~                        // flags — zero is safest
