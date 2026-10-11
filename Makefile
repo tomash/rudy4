@@ -22,11 +22,17 @@ EXP_SRCS := exp_wrap exp_cross exp_perf
 
 .PHONY: all clean test check exp exp-test
 
-all: .build/dextest.so
+all: .build/dextest.so .build/dexitest.so
 
 # One shared object: the rudy library modules + the extension entry point.
 .build/dextest.so: $(DC_SRCS) src/dextest.d | .build
 	$(GDC) -shared -o $@ $(DFLAGS) $(DC_SRCS) src/dextest.d \
+	  -L$(LIBRUBY_DIR) $(LIBRUBYARG) -lm
+
+# Missing-API bindings extension: yield/rescue/ensure/singleton/scan_args/
+# GVL bindings + variadic def! (D default args -> Ruby optional args).
+.build/dexitest.so: $(DC_SRCS) src/dexitest.d | .build
+	$(GDC) -shared -o $@ $(DFLAGS) $(DC_SRCS) src/dexitest.d \
 	  -L$(LIBRUBY_DIR) $(LIBRUBYARG) -lm
 
 .build:
@@ -44,9 +50,10 @@ exp-test: exp
 	$(RUBY) experiments/test_exp_cross.rb
 	$(RUBY) experiments/test_exp_perf.rb
 
-# Ruby-side acceptance suite (dexter revival)
+# Ruby-side acceptance suite (dexter revival + missing-API bindings)
 test: all
 	$(RUBY) test/run.rb
+	$(RUBY) test/exitest.rb
 
 check: test
 

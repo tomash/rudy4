@@ -30,7 +30,10 @@ private void rb_require_c(string name)
 /// Convert a native D value into a Ruby VALUE.
 VALUE to_ruby_value(T)(T t)
 {
-    static if (is(T == bool))
+    static if (is(T == VALUE))       // raw passthrough — already a VALUE
+        return t;
+
+    else static if (is(T == bool))
         return t ? Qtrue_ : Qfalse_;
 
     else static if (is(T == char))
