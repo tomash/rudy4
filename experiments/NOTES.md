@@ -10,21 +10,19 @@ Three torture tests, all passing (`make exp-test`):
 
 ## Bugs found by the torture tests (and fixes)
 
-1. **`rb_data_object_get` is an inline C macro, not an exported symbol.**
+1. **`VALUE` is aliased to `ulong` → `def!` raw-passthrough swallows `ulong` params.**
+   **FIXED** (issue #1): in `rudy/defs.d`, `is(P[i] == VALUE)` used to pass the
+   raw tagged VALUE to any `ulong` param (Ruby `5` arrived as `11`; fib(28)
+   silently computed F(57)). Passthrough is now opt-in via `Raw!T` params;
+   plain `ulong` params decode via `d_type!ulong` (rb_num2ulong). Regression
+   tests: `identity_ulong`, `double_it_ulong`, `raw_value_id` in the
+   acceptance suite (test/run.rb).
+
+2. **`rb_data_object_get` is an inline C macro, not an exported symbol.**
    Can't be called from D. Fix in `exp_wrap`: D-side registry
    (`Matrix*[ulong]` keyed by `rb_obj_id`, reverse map, cleaned in the free
    callback). This is the main missing-API finding: rudy should ship a
    typed-data helper (wrap + unwrap + registry) as library code.
-
-2. **`VALUE` is aliased to `ulong` → `def!` raw-passthrough defeats `d_type`.**
-   In `rudy/defs.d`, `is(P[i] == VALUE)` exists so D funcs taking raw VALUEs
-   work — but since `VALUE == ulong`, any D function with a `ulong` parameter
-   gets the **tagged** VALUE passed through untouched (Ruby `5` arrives as
-   `11`). This silently corrupted `perf_fib(ulong)` (fib(28) was actually
-   computing F(57) — looked like a hang, was just astronomically slow).
-   Workaround: take `long` (or any non-VALUE type) so `d_type` decodes.
-   Library fix: make raw-passthrough opt-in (distinct `TypedValue` type or a
-   `Raw` wrapper struct) instead of triggering on the alias.
 
 3. **Uninitialized `double x;` in D is NaN** — not 0.0. Hit this **three
    separate times** (`det`, `cross_sum`, `perf_build total`): any `double`

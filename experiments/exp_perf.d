@@ -15,12 +15,10 @@ import std.string : toStringz;
 
 private:
 
-// classic def! — NB: param must NOT be ulong: VALUE is aliased to ulong,
-// so a ulong param hits the raw-passthrough branch in the trampoline
-// and arrives TAGGED (n -> 2n+1). Use long so d_type decodes it.
-ulong perf_fib(long n_)
+// classic def! — ulong params decode correctly now (issue #1 fixed):
+// the trampoline used to pass TAGGED VALUEs to any ulong param.
+ulong perf_fib(ulong n)
 {
-    ulong n = cast(ulong) n_;
     ulong fib(ulong k) { return k < 2 ? k : fib(k - 1) + fib(k - 2); }
     // recursion stays in D — this measures D-side speed
     return fib(n);

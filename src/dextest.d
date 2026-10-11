@@ -65,6 +65,13 @@ bool convert_bool_two_ways(bool b)       { return b; }
 
 long add_five(long n) { return n + 5; }
 
+// issue #1 regression: ulong params used to receive TAGGED VALUEs (5 -> 11)
+ulong double_it_ulong(ulong n) { return n * 2; }
+ulong identity_ulong(ulong n)  { return n; }
+
+// opt-in raw VALUE passthrough: the function sees the tagged bits untouched
+Raw!VALUE raw_value_id(Raw!VALUE v) { return v; }
+
 string greet(string name, int n)
 {
     import std.conv;
@@ -100,6 +107,11 @@ extern(C) void Init_dextest()
     def!(convert_string_two_ways);
     def!(convert_bool_two_ways);
     def!(add_five);
+
+    // issue #1 regression tests
+    def!(double_it_ulong);
+    def!(identity_ulong);
+    def!(raw_value_id);
 
     // module function
     VALUE DexterModule = rb_define_module("DexterModule");
