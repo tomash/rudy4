@@ -1,4 +1,4 @@
-# rudy-d
+# rudy4
 
 **Write Ruby native extensions in D.** A from-scratch rewrite of
 [rudy](https://github.com/tomash/rudy) (2010), targeting **Ruby 4.0** and
@@ -83,7 +83,7 @@ make test RUBY=~/.asdf/installs/ruby/4.0.7/bin/ruby
 
 ## Differences from 2010 rudy
 
-| 2010 rudy | rudy-d |
+| 2010 rudy | rudy4 |
 |---|---|
 | Ruby 1.8 | Ruby 4.0 |
 | D1 | D2 (GDC 14) |
