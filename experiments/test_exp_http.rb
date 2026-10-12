@@ -16,7 +16,7 @@
 #      second round.
 
 require "pathname"
-EXT = Pathname.new(__dir__).parent + ".build" + "exp_http.so"
+EXT = Pathname.new(__dir__).parent + ENV.fetch("RUDY_BUILD_DIR", ".build") + "exp_http.so"
 raise "exp_http not built: run `make exp` first" unless EXT.exist?
 require EXT.to_s
 

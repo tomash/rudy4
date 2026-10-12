@@ -1,6 +1,6 @@
 # EXP 3 — performance & GC torture
 require_relative "../test/dextest_loader"
-require File.expand_path("../.build/exp_perf.so", __dir__)
+require File.expand_path("../#{ENV.fetch("RUDY_BUILD_DIR", ".build")}/exp_perf.so", __dir__)
 
 def bench(label)
   t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)

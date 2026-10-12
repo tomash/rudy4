@@ -6,7 +6,7 @@
 # Findings so far: #12 (rb_str_strlen chars-vs-bytes truncation).
 
 require "pathname"
-EXT = Pathname.new(__dir__).parent + ".build" + "exp_convert.so"
+EXT = Pathname.new(__dir__).parent + ENV.fetch("RUDY_BUILD_DIR", ".build") + "exp_convert.so"
 raise "extension not built: run `make exp` first" unless EXT.exist?
 require EXT.to_s
 

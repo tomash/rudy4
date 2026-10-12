@@ -8,7 +8,7 @@
 #   churn_cycles > 0 (the D thread really ran concurrently)
 
 require "pathname"
-EXT = Pathname.new(__dir__).parent + ".build" + "exp_gcstorm.so"
+EXT = Pathname.new(__dir__).parent + ENV.fetch("RUDY_BUILD_DIR", ".build") + "exp_gcstorm.so"
 raise "exp_gcstorm not built: run `make exp` first" unless EXT.exist?
 require EXT.to_s
 

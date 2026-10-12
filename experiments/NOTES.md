@@ -241,6 +241,38 @@ Ten torture tests, all passing (`make exp-test`):
     (objproto hooks, exp_gcstorm); keep `= &fn` defaults only where
     they already compile (typeddata).
 
+23. **gdc-14 `-fsanitize=address` makes every druntime `rt_init()`
+    call SEGV** — `ModuleInfo.flags` read at address 0 inside
+    `_d_deregister_module_info`/init machinery, identical for every
+    ASAN_OPTIONS variant tried (`detect_leaks=0`,
+    `protect_shadow_gap=0`, `disable_coredump=1`,
+    `verify_asan_link_order=0`, `fast_unwind_on_fatal=1`). Pure-C
+    probes under the same gcc-14 ASan are fine, so it is D-runtime-
+    init-specific (likely druntime's module-info list vs ASan's
+    instrumentation of the init path). Affects the four experiments
+    whose init hook calls `rt_init()` (gcstorm/compact/convert/
+    objproto); no workaround found — excluded from ASan runs.
+
+24. **A D .so that skips explicit `rt_init()` works under ASan via
+    druntime's lazy init** — minimal extern(C) probe (mini_add + lazy
+    GC allocation via `"lazy-gc-ok".idup`) linked with
+    `-fsanitize=address -shared -lgdruntime` and dlopen'd under
+    `LD_PRELOAD=libasan.so` runs clean (rc=0, allocation works, lazy
+    GC init works). Consequence: the six rt_init-free experiments
+    (wrap/cross/perf/exc/defargs/http) are ASan-runnable. Real run
+    results (make memcheck / scripts/memcheck.sh): wrap, cross, perf,
+    exc, defargs all PASS (0 ASan reports); http aborts with ASan
+    `Failed to munmap` (16 KB, error code 22) at a FIXED address even
+    with `GC.disable()` at test top — not GC-sweep-driven; suspects:
+    druntime GC pool release path or thread teardown vs ASan's
+    allocator. http is built but excluded from the run. Two extra
+    ASAN_OPTIONS are required: `detect_leaks=0` (LeakSanitizer flags
+    D GC heap pages — false positives for a GC'd language) and
+    `detect_odr_violation=0` (suites that load dextest.so in addition
+    to their own .so register the rudy globals twice; benign).
+    This constrains but does not invalidate ASan coverage: every
+    non-rt_init experiment now runs under a real memory-error detector.
+
 ## ABI conformance audit (scripts/abi_audit.sh)
 
 `scripts/abi_audit.sh` diffs the `extern(C)` declarations in
@@ -359,6 +391,24 @@ Still missing / future work:
   generating mixins must public-import every symbol its generated code
   references (`public import` in rudy.objproto) or the user's module
   fails on undefined identifiers.
+- **gdc-14 `-fsanitize=address` is unusable for any module that runs
+  druntime's `rt_init()`** (finding 23): the process SEGVs reading
+  `ModuleInfo.flags` NULL, for every ASAN_OPTIONS variant tried
+  (`detect_leaks=0`, `protect_shadow_gap=0`, `disable_coredump=1`,
+  `verify_asan_link_order=0`, `fast_unwind_on_fatal=1`). Pure-C ASan
+  probes are fine, so it is D-init-specific. A D .so that skips explicit
+  `rt_init()` and relies on druntime LAZY init works (finding 24): the
+  six rt_init-free experiments build and run green under ASan via
+  `make memcheck` (wrap/cross/perf/exc/defargs; http excluded — see
+  below). Extra options needed: `detect_leaks=0` (LeakSanitizer flags D
+  GC heap pages) and `detect_odr_violation=0` (suites that also load
+  dextest.so register the rudy globals twice — benign duplicate).
+- **exp_http under ASan aborts with `Failed to munmap`** (16 KB at a
+  fixed address, error code 22) even with `GC.disable()` at test top —
+  not GC-sweep-driven; fixed fault address across runs. Suspects: the
+  druntime GC pool release path / thread teardown interacting with
+  ASan's allocator. http is therefore built but not run in memcheck
+  (finding 24).
 
 ## Build/test commands
 
@@ -366,4 +416,6 @@ Still missing / future work:
 make exp            # build experiments
 make exp-test       # run all ten experiment suites
 ruby test/run.rb    # core dextest suite
+make memcheck       # ASan subset (rt_init-free exps; NOTES #23/#24)
+bash scripts/memcheck.sh   # same, standalone (CI-friendly)
 ```
