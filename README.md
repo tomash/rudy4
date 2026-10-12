@@ -77,7 +77,7 @@ Conversion semantics worth knowing (pinned by `exp_convert`):
 
 ### D gotchas
 
-The torture experiments found **nineteen** D-specific traps; the full catalog
+The torture experiments found **twenty-four** D-specific traps; the full catalog
 with fixes lives in experiments/NOTES.md. The ones that will bite you on
 day one:
 
@@ -93,7 +93,10 @@ day one:
   pthreads, so shared state needs `__gshared`.
 - **D exceptions must never escape an extern(C) frame** (or a
   no-GVL callback) — catch in D, raise Ruby-side after re-acquiring the GVL.
-- Uninitialized integers and pointers are fine (0/null).
+- **Uninitialized integers and pointers are fine (0/null).**
+- **gdc-14 + `-fsanitize=address` crashes on any explicit `rt_init()`**
+  (ModuleInfo NULL SEGV, finding #23) — ASan coverage is limited to the
+  rt_init-free experiments, which pass clean (`make memcheck`, finding #24).
 
 ## Wrapping D structs: `RudyTypedData`
 
@@ -263,7 +266,10 @@ multibyte/binary/invalid-encoding strings, GC.stress at the seam, and the
 `def!` argument-passing machinery itself — blocks, `*rest`, `**kwargs`,
 visibility, singletons). They found
 nineteen real bugs (ABI widths, a missing `rt_init()`, thread-local-by-default module
-state, a TypedData free-callback routing bug, ...), all documented with
+state, a TypedData free-callback routing bug, ...) plus five toolchain
+findings (#20–#24: object-protocol semantics, the zalloc size-arg bug,
+GDC template-arg quirks, and the gdc-14 ASan/rt_init limitations), all
+documented with
 fixes in **experiments/NOTES.md** — that file is the real catalog of
 D-specific traps when writing Ruby extensions. Run them with `make exp`
 then `make exp-test`.
@@ -275,6 +281,7 @@ make        # builds .build/dextest.so, .build/dexitest.so and .build/dtypetest.
 make test   # runs test/run.rb + test/exitest.rb + test/typedtest.rb (62 assertions)
 make exp    # builds the ten experiment extensions (experiments/)
 make exp-test  # runs all ten torture suites (432 assertions, see experiments/NOTES.md)
+make memcheck  # ASan subset: builds .build.asan and runs the rt_init-free suites
 ```
 
 The Makefile finds Ruby via `ruby -e` hdrdir/libdir queries (works with

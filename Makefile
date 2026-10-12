@@ -12,6 +12,16 @@ RUBYARCHHDR := $(shell $(RUBY) -e 'print RbConfig::CONFIG["rubyarchhdrdir"]')
 LIBRUBYARG  := $(shell $(RUBY) -e 'print RbConfig::CONFIG["LIBRUBYARG_SHARED"]')
 LIBRUBY_DIR := $(shell $(RUBY) -e 'print RbConfig::CONFIG["libdir"]')
 
+BUILD ?= .build
+# ASan variant: `make ASAN=1 ...` or `make memcheck` builds into .build.asan
+# with -fsanitize=address. Note (experiments/NOTES.md #23): druntime rt_init
+# SEGVs under gdc-14 ASan, so only the rt_init-free experiments
+# (wrap/cross/perf/exc/defargs/http) are meaningful this way.
+ifeq ($(ASAN),1)
+  BUILD := .build.asan
+  DFLAGS += -fsanitize=address
+endif
+
 DFLAGS := -fPIC -Isrc -I$(RUBYHDR) -I$(RUBYARCHHDR) \
           -fpreview=dip1008 \
           -Wno-deprecated
@@ -20,35 +30,38 @@ DC_SRCS := $(wildcard src/rudy/*.d src/rudy/bind/*.d)
 
 EXP_SRCS := exp_wrap exp_cross exp_perf exp_http exp_gcstorm exp_exc exp_compact exp_convert exp_defargs exp_objproto
 
-.PHONY: all clean test check typed-test exp exp-test
+# rt_init-free subset that works under ASan (NOTES.md #23/#24).
+ASAN_EXP_SRCS := exp_wrap exp_cross exp_perf exp_exc exp_defargs exp_http
 
-all: .build/dextest.so .build/dexitest.so .build/dtypetest.so
+.PHONY: all clean test check typed-test exp exp-test exp-asan exp-asan-test memcheck
+
+all: $(BUILD)/dextest.so $(BUILD)/dexitest.so $(BUILD)/dtypetest.so
 
 # One shared object: the rudy library modules + the extension entry point.
-.build/dextest.so: $(DC_SRCS) src/dextest.d | .build
+$(BUILD)/dextest.so: $(DC_SRCS) src/dextest.d | $(BUILD)
 	$(GDC) -shared -o $@ $(DFLAGS) $(DC_SRCS) src/dextest.d \
 	  -L$(LIBRUBY_DIR) $(LIBRUBYARG) -lm
 
 # Missing-API bindings extension: yield/rescue/ensure/singleton/scan_args/
 # GVL bindings + variadic def! (D default args -> Ruby optional args).
-.build/dexitest.so: $(DC_SRCS) src/dexitest.d | .build
+$(BUILD)/dexitest.so: $(DC_SRCS) src/dexitest.d | $(BUILD)
 	$(GDC) -shared -o $@ $(DFLAGS) $(DC_SRCS) src/dexitest.d \
 	  -L$(LIBRUBY_DIR) $(LIBRUBYARG) -lm
 
 # TypedData extension: rudy library + typeddata helper + dtypetest entry point.
-.build/dtypetest.so: $(DC_SRCS) src/dtypetest.d | .build
+$(BUILD)/dtypetest.so: $(DC_SRCS) src/dtypetest.d | $(BUILD)
 	$(GDC) -shared -o $@ $(DFLAGS) $(DC_SRCS) src/dtypetest.d \
 	  -L$(LIBRUBY_DIR) $(LIBRUBYARG) -lm
 
-.build:
-	mkdir -p .build
+$(BUILD):
+	mkdir -p $(BUILD)
 
 # Experiments: each experiment .d becomes its own .so
-.build/exp_%.so: experiments/exp_%.d $(DC_SRCS) | .build
+$(BUILD)/exp_%.so: experiments/exp_%.d $(DC_SRCS) | $(BUILD)
 	$(GDC) -shared -o $@ $(DFLAGS) $(DC_SRCS) $< \
 	  -L$(LIBRUBY_DIR) $(LIBRUBYARG) -lm
 
-exp: $(addprefix .build/,$(EXP_SRCS:=.so))
+exp: $(addprefix $(BUILD)/,$(EXP_SRCS:=.so))
 
 exp-test: exp
 	$(RUBY) experiments/test_exp_wrap.rb
@@ -62,6 +75,33 @@ exp-test: exp
 	$(RUBY) experiments/test_exp_defargs.rb
 	$(RUBY) experiments/test_exp_objproto.rb
 
+ASAN_PRELOAD := LD_PRELOAD=$(shell $(GDC) -print-file-name=libasan.so)
+# detect_odr_violation=0: wrap/cross/perf .so's each embed a copy of the rudy
+# library also present in dextest.so (loaded by the suite loader) — ASan would
+# otherwise abort on the duplicate registered globals.
+ASAN_OPTS := ASAN_OPTIONS=detect_leaks=0:halt_on_error=1:allocator_may_return_null=1:detect_odr_violation=0
+
+# ASan subset of the experiment suites (NOTES.md #23/#24). Builds lib +
+# dextest.so + the rt_init-free exp .so's into .build.asan, then runs the
+# corresponding test files under ruby with LD_PRELOAD=libasan.so.
+# http is built but NOT run (NOTES.md #24: munmap crash, under investigation).
+exp-asan-test:
+	$(MAKE) ASAN=1 --no-print-directory $(addprefix .build.asan/,$(ASAN_EXP_SRCS:=.so)) .build.asan/dextest.so
+	$(ASAN_PRELOAD) $(ASAN_OPTS) RUDY_BUILD_DIR=.build.asan $(RUBY) experiments/test_exp_wrap.rb
+	$(ASAN_PRELOAD) $(ASAN_OPTS) RUDY_BUILD_DIR=.build.asan $(RUBY) experiments/test_exp_cross.rb
+	$(ASAN_PRELOAD) $(ASAN_OPTS) RUDY_BUILD_DIR=.build.asan $(RUBY) experiments/test_exp_perf.rb
+	$(ASAN_PRELOAD) $(ASAN_OPTS) RUDY_BUILD_DIR=.build.asan $(RUBY) experiments/test_exp_exc.rb
+	$(ASAN_PRELOAD) $(ASAN_OPTS) RUDY_BUILD_DIR=.build.asan $(RUBY) experiments/test_exp_defargs.rb
+
+exp-asan: exp-asan-test
+
+# Memory-safety torture runs (backlog item 7). Local: ASan subset above;
+# valgrind not installed locally (CI-only). Excluded locally: http (NOTES.md
+# #24 munmap crash, under investigation); gcstorm/compact/convert/objproto
+# (NOTES.md #23 rt_init SEGV).
+memcheck: exp-asan-test
+	@echo "memcheck: ASan subset complete (see experiments/NOTES.md #23/#24)"
+
 # Ruby-side acceptance suite (dexter revival + missing-API bindings)
 test: all
 	$(RUBY) test/run.rb
@@ -71,4 +111,4 @@ test: all
 check: test
 
 clean:
-	rm -rf .build
+	rm -rf .build .build.asan

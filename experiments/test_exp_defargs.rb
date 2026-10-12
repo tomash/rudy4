@@ -6,7 +6,7 @@
 # Findings so far: none yet (first run of this suite).
 
 require "pathname"
-EXT = Pathname.new(__dir__).parent + ".build" + "exp_defargs.so"
+EXT = Pathname.new(__dir__).parent + ENV.fetch("RUDY_BUILD_DIR", ".build") + "exp_defargs.so"
 raise "extension not built: run `make exp` first" unless EXT.exist?
 require EXT.to_s
 

@@ -1,6 +1,6 @@
 # EXP 2 — D<->Ruby two-way boundary crossing
 require_relative "../test/dextest_loader"
-require File.expand_path("../.build/exp_cross.so", __dir__)
+require File.expand_path("../#{ENV.fetch("RUDY_BUILD_DIR", ".build")}/exp_cross.so", __dir__)
 
 module ExpCross
   # shoelace helper D calls back into — proves D can invoke Ruby

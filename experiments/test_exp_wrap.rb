@@ -1,6 +1,6 @@
 # EXP 1 — wrap a real D struct as a Ruby object (DMatrix)
 require_relative "../test/dextest_loader"
-require File.expand_path("../.build/exp_wrap.so", __dir__)
+require File.expand_path("../#{ENV.fetch("RUDY_BUILD_DIR", ".build")}/exp_wrap.so", __dir__)
 
 m = DMatrix.new(3, 3)
 [[2, 0, 1], [0, 3, 0], [1, 0, 2]].each_with_index do |row, r|

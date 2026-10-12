@@ -18,7 +18,7 @@
 #   principle, but reliably reproduced here.
 
 require "pathname"
-EXT = Pathname.new(__dir__).parent + ".build" + "exp_compact.so"
+EXT = Pathname.new(__dir__).parent + ENV.fetch("RUDY_BUILD_DIR", ".build") + "exp_compact.so"
 raise "exp_compact not built: run `make exp` first" unless EXT.exist?
 require EXT.to_s
 
