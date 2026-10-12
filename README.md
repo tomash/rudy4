@@ -149,6 +149,59 @@ MyModule.var_sum         # ArgumentError (a is required)
 Raw `VALUE` parameters (and `VALUE` returns via `to_ruby_value`) pass
 through untouched, so D functions can mix optional and raw-VALUE args.
 
+### Blocks, `*rest`, `**kwargs`, `Self`, and visibility
+
+Special parameters are filled by the trampoline itself, never decoded
+from argv (at most one of `Rest`/`KwArgs`/`RubyBlock` per function;
+`RubyBlock` must be the last parameter; declaring one switches the
+registration to the uniform argc/argv trampoline):
+
+```d
+import rudy.args;
+import rudy.convert;
+
+long with_block(long n, RubyBlock blk)
+{
+    if (!blk.given) return n;
+    return blk.call(n);              // yields n, returns block result
+}
+
+long rest_sum(long first, Rest rest) // var_sum(1, 2, 3) -> rest = [2, 3]
+{
+    long total = first;
+    foreach (v; rest) total += d_type!long(v);
+    return total;
+}
+
+string kw_pick(KwArgs kw)            // kw_pick(n: 5) / kw_pick()
+{
+    long n = kw.get!long("n", 0);    // D default when the key is absent
+    import std.conv : to;
+    return "n=" ~ to!string(n) ~ (kw.given ? " (given)" : "");
+}
+```
+
+Semantics pinned by `exp_defargs` (44 assertions):
+
+- `RubyBlock.call` with no block given raises `LocalJumpError` —
+  the same contract as `yield`. `given` tells the two cases apart;
+  calling other `def!`'d D methods from inside a block body works
+  (reentrancy).
+- A `Rest` of zero args is an **empty array**, not `nil` — matching
+  Ruby's own `*rest` semantics (`length == 0`, `empty` agrees).
+- KwArgs keys arrive as Symbols; `kw.to!(V, string)` normalizes them
+  via `to_s`. Decode values into concrete D types
+  (`kw.to!(long, string)`); to walk values untouched use
+  `kw.to!(Raw!VALUE, string)` — a plain `VALUE`/`ulong` V would run a
+  numeric decode over every value and raise on non-numbers.
+- Visibility and singletons: `def_private!`/`def_protected!` define
+  instance-level methods (probe through `Object.new.extend(Mod)` or
+  `send`), `def_singleton!` a class-level method, `def_singleton_on!`
+  attaches to one specific object (`"Mod::CONST"` paths walk the scope
+  chain). `Self` receives the actual receiver.
+- Returning a Ruby object built in D requires a `Raw!VALUE` return
+  (finding #17): a plain `VALUE` return is converted as a machine word.
+
 ## Beyond def! — direct C-API bindings
 
 `src/rudy/bind/value.d` also binds the pieces you need to write
@@ -179,7 +232,7 @@ src/rudy/typeddata.d    RudyTypedData mixin: wrap D structs as Ruby objects
 src/dextest.d           acceptance-test extension (old "dexter" revived)
 src/dexitest.d          missing-API bindings acceptance extension
 src/dtypetest.d         typed-data acceptance extension
-experiments/           seven torture experiments (see experiments/NOTES.md)
+experiments/           eight torture experiments (see experiments/NOTES.md)
 test/run.rb             Ruby-side acceptance suite (22 assertions)
 test/exitest.rb         bindings acceptance suite (31 assertions)
 test/typedtest.rb       typed-data acceptance suite (9 assertions)
@@ -199,14 +252,16 @@ functions (`rb_string_value_ptr`, `rb_float_value`, `rb_ary_entry`, ...).
 
 ## Torture experiments (`experiments/`)
 
-Seven experiments probe the D↔Ruby seam far past what the acceptance
+Eight experiments probe the D↔Ruby seam far past what the acceptance
 suites cover — GVL-released blocking I/O with a hand-written TCP server,
 48k-object TypedData GC storms against a concurrent `GC.collect()` churn
 thread, 50-level exception ping-pong with `rb_rescue`/`rb_ensure`/nested
 `rb_protect` and `rb_exc_raise` identity, perf, and conversion round trips
 across every supported D type (integers at ±2^63/2^64-1, NaN/inf,
-multibyte/binary/invalid-encoding strings, GC.stress at the seam). They found
-twelve real bugs (ABI widths, a missing `rt_init()`, thread-local-by-default module
+multibyte/binary/invalid-encoding strings, GC.stress at the seam, and the
+`def!` argument-passing machinery itself — blocks, `*rest`, `**kwargs`,
+visibility, singletons). They found
+fifteen real bugs (ABI widths, a missing `rt_init()`, thread-local-by-default module
 state, a TypedData free-callback routing bug, ...), all documented with
 fixes in **experiments/NOTES.md** — that file is the real catalog of
 D-specific traps when writing Ruby extensions. Run them with `make exp`
@@ -217,8 +272,8 @@ then `make exp-test`.
 ```sh
 make        # builds .build/dextest.so, .build/dexitest.so and .build/dtypetest.so
 make test   # runs test/run.rb + test/exitest.rb + test/typedtest.rb (62 assertions)
-make exp    # builds the seven experiment extensions (experiments/)
-make exp-test  # runs all seven torture suites (364 assertions, see experiments/NOTES.md)
+make exp    # builds the eight experiment extensions (experiments/)
+make exp-test  # runs all eight torture suites (389 assertions, see experiments/NOTES.md)
 ```
 
 The Makefile finds Ruby via `ruby -e` hdrdir/libdir queries (works with
@@ -244,3 +299,4 @@ make test RUBY=~/.asdf/installs/ruby/4.0.7/bin/ruby
 ## License
 
 MIT (as the original).
+{"id":"68e8e704-0284-4ad5-a0cb-bb18d9e07247","session_id":"9621158e975c2a39","timestamp":"2026-10-12T11:17:34+00:00","model":"openrouter/auto","provider":"openrouter","prompt_tokens":29562,"completion_tokens":18,"cache_read_tokens":29184,"cache_write_tokens":0,"cost_usd":0.0015249,"cost_source":"api"}
