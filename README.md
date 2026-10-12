@@ -77,7 +77,7 @@ Conversion semantics worth knowing (pinned by `exp_convert`):
 
 ### D gotchas
 
-The torture experiments found **twelve** D-specific traps; the full catalog
+The torture experiments found **nineteen** D-specific traps; the full catalog
 with fixes lives in experiments/NOTES.md. The ones that will bite you on
 day one:
 
@@ -229,10 +229,11 @@ src/rudy/bind/value.d   hand-written binding to the Ruby 4.0 C API
 src/rudy/convert.d      to_ruby_value!(T) / d_type!(T) conversions
 src/rudy/defs.d         def! templates + extern(C) trampolines
 src/rudy/typeddata.d    RudyTypedData mixin: wrap D structs as Ruby objects
+src/rudy/objproto.d     RudyObjectProtocol mixin: dup/clone/==/hash/inspect/freeze
 src/dextest.d           acceptance-test extension (old "dexter" revived)
 src/dexitest.d          missing-API bindings acceptance extension
 src/dtypetest.d         typed-data acceptance extension
-experiments/           eight torture experiments (see experiments/NOTES.md)
+experiments/           ten torture experiments (see experiments/NOTES.md)
 test/run.rb             Ruby-side acceptance suite (22 assertions)
 test/exitest.rb         bindings acceptance suite (31 assertions)
 test/typedtest.rb       typed-data acceptance suite (9 assertions)
@@ -261,7 +262,7 @@ across every supported D type (integers at ±2^63/2^64-1, NaN/inf,
 multibyte/binary/invalid-encoding strings, GC.stress at the seam, and the
 `def!` argument-passing machinery itself — blocks, `*rest`, `**kwargs`,
 visibility, singletons). They found
-fifteen real bugs (ABI widths, a missing `rt_init()`, thread-local-by-default module
+nineteen real bugs (ABI widths, a missing `rt_init()`, thread-local-by-default module
 state, a TypedData free-callback routing bug, ...), all documented with
 fixes in **experiments/NOTES.md** — that file is the real catalog of
 D-specific traps when writing Ruby extensions. Run them with `make exp`
@@ -272,8 +273,8 @@ then `make exp-test`.
 ```sh
 make        # builds .build/dextest.so, .build/dexitest.so and .build/dtypetest.so
 make test   # runs test/run.rb + test/exitest.rb + test/typedtest.rb (62 assertions)
-make exp    # builds the eight experiment extensions (experiments/)
-make exp-test  # runs all eight torture suites (389 assertions, see experiments/NOTES.md)
+make exp    # builds the ten experiment extensions (experiments/)
+make exp-test  # runs all ten torture suites (432 assertions, see experiments/NOTES.md)
 ```
 
 The Makefile finds Ruby via `ruby -e` hdrdir/libdir queries (works with
@@ -300,3 +301,4 @@ make test RUBY=~/.asdf/installs/ruby/4.0.7/bin/ruby
 
 MIT (as the original).
 {"id":"68e8e704-0284-4ad5-a0cb-bb18d9e07247","session_id":"9621158e975c2a39","timestamp":"2026-10-12T11:17:34+00:00","model":"openrouter/auto","provider":"openrouter","prompt_tokens":29562,"completion_tokens":18,"cache_read_tokens":29184,"cache_write_tokens":0,"cost_usd":0.0015249,"cost_source":"api"}
+{"id":"36b596c4-88a5-498a-9bb5-d502dee57cc1","session_id":"86e7421794b3de46","timestamp":"2026-10-12T12:11:19+00:00","model":"openrouter/auto","provider":"openrouter","prompt_tokens":14236,"completion_tokens":65,"cache_read_tokens":0,"cache_write_tokens":0,"cost_usd":0.0021679,"cost_source":"api"}

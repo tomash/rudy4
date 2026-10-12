@@ -147,4 +147,3 @@ else
   puts "FAIL: #{$failures}/#{$count} assertions failed"
   exit 1
 end
-{"id":"2a1fc46a-7ca7-4840-83ea-3aa7739e4359","session_id":"86e7421794b3de46","timestamp":"2026-10-12T11:14:10+00:00","model":"openrouter/auto","provider":"openrouter","prompt_tokens":19528,"completion_tokens":18,"cache_read_tokens":17664,"cache_write_tokens":0,"cost_usd":0.0011718,"cost_source":"api"}

@@ -1,6 +1,6 @@
 # Experiments — Findings & Notes
 
-Nine torture tests, all passing (`make exp-test`):
+Ten torture tests, all passing (`make exp-test`):
 
 | # | Experiment | What it tortures |
 |---|------------|------------------|
@@ -13,6 +13,7 @@ Nine torture tests, all passing (`make exp-test`):
 | 7 | `exp_compact` | GC compaction vs wrapped structs and registered globals: `GC.compact` moves ~1.4k objects while TypedData wrappers hold references to them. Negative control (no callbacks) collects referents and crashes the VM; guarded wrapper (`dmark`=`rb_gc_mark_movable` + `dcompact`=`rb_gc_location` rewrite) survives with identity preserved. Registered globals via `rb_gc_register_address` + `rb_gc_location` refresh (8 assertions + subprocess witness) |
 | 8 | `exp_convert` | Conversion-layer round trips: integers at ±2^63/2^64-1 boundaries, NaN/±0.0/inf, empty/NUL/binary/EUC-JP strings, frozen strings, 200-case binary fuzz, GC.stress mid-conversion, truthiness edges, hostile coercions (298 assertions; findings #12–#15) |
 | 9 | `exp_defargs` | `def!` argument-passing torture: blocks (call overloads, arity, reentrant `def!` inside a block body, raise-through-frame), `*rest` (bignum RangeError, empty-array semantics), `**kwargs` (symbol+string keys, D defaults, Raw!VALUE walk), `Self`, private/protected visibility, class singletons + per-object `def_singleton_on`, combined layouts (44 assertions; findings #16–#18) |
+| 10 | `exp_objproto` | Object protocol: allocate/dup/clone/==/eql?/hash/inspect/freeze on RudyObjectProtocol'd Vec2, Hash keying, GC storm (43 assertions; findings #19–#22) |
 
 ## Bugs found by the torture tests (and fixes)
 
@@ -179,6 +180,67 @@ Nine torture tests, all passing (`make exp-test`):
     must never escape extern(C)"); not fixable D-side. Documented and
     pinned as expected behavior (raise_walk in exp_defargs).
 
+19. **`dup`/`clone` on a TypedData wrapper shallow-copy the WRAPPER,
+    not the struct.** Both handles point at the SAME malloc'd struct —
+    mutating the "copy" mutates the "original" (exp_objproto
+    control test). Worse, the wrapper's `dfree` fires TWICE for one
+    allocation when both wrappers are collected → double free.
+    Ruby implements dup AND clone through one PRIVATE hook,
+    `initialize_copy` (clone additionally propagates frozen state):
+    define `allocate` + `initialize_copy` and both do the right thing.
+    C-API tools: `rb_data_typed_object_zalloc` (zeroed struct in
+    Ruby's GC heap, freed by the class's dfree) + a private
+    `initialize_copy` doing `*dst = *src` (+ optional deep-copy hook).
+
+20. **`==` never fires, `freeze` enforces nothing, on a bare wrapper.**
+    Object#== is identity, so two byte-identical wrappers are never
+    equal and don't hash equal (Hash keys collide on identity hash —
+    Dictionary-style lookups impossible). `freeze` sets a flag nothing
+    checks: mutators write straight through into the "frozen" struct.
+    Fix (objproto): `==`/`eql?` = memcmp over T.sizeof (non-wrapper
+    other → Qfalse, never raise), `hash` = FNV-1a over T.sizeof
+    masked to 63 bits (Ruby Hash hashes are signed — mask off the
+    sign bit or the unsigned machine word decodes negative),
+    mutators guard with `rb_check_frozen` (exported; FrozenError
+    comes from Ruby itself). `rb_check_frozen` + `rb_eFrozenError`
+    were NOT in the original binding set.
+
+21. **`rb_data_typed_object_zalloc` was bound with a MISSING size
+    argument.** The 2010-era prototype `(klass, type)` vs the real
+    4.0.7 signature `(klass, size_t size, struct st_table type*)` —
+    on x86-64 the two-arg call "worked" by register reuse: the type
+    pointer landed in rdx where the callee reads the third argument.
+    Silent UB that happens to pass. Also hit this experiment:
+    `rb_class2name` needed binding (inspect wants the class name),
+    and `inspect` without a hook is not generated at all — Ruby's
+    default `#<Class:0x...>` stands (don't fight it).
+
+22. **GDC 14 rejects `&fn` as a template value argument for
+    function-pointer params — but accepts the identical default.**
+    `RudyTypedData!(BoxCell, "boxcell", &rudy_typed_free)` fails with
+    `expression '& fn' is not a valid template value argument`, while
+    the SAME `&rudy_typed_free` as the template's `= &rudy_typed_free`
+    DEFAULT compiles fine in the same build. Typing the param as
+    function pointer makes both forms fail
+    (`does not match template declaration`). Full probe campaign
+    (tmatch60–99, ~30 minimal repros: variadic/typed/alias-decl
+    params × mixin-statement context × multi-module splits × real
+    value.d+typeddata.d modules × struct-field shapes) could not
+    produce a minimal failing case — yet the real
+    `src/rudy/typeddata.d` + `rudy.bind.value` combination compiles
+    both the default form and explicit `&fn` form. Something in the
+    combined module context satisfies GDC's matcher; a minimal repro
+    remains elusive. Error taxonomy: `&fn` in value-arg position
+    (variadic or fp-typed param) → "not a valid template value
+    argument"; fp-typed param + default, arg omitted → "does not
+    match template declaration" (GDC materializes the default as a
+    `&fn` value arg then rejects it — the error shows
+    `RD!("x", & my_typed_free)` even though the source wrote
+    `RD!("x")`). GROUND RULE for this codebase: pass callable
+    template arguments as ALIAS parameters with the symbol BARE
+    (objproto hooks, exp_gcstorm); keep `= &fn` defaults only where
+    they already compile (typeddata).
+
 ## ABI conformance audit (scripts/abi_audit.sh)
 
 `scripts/abi_audit.sh` diffs the `extern(C)` declarations in
@@ -291,11 +353,17 @@ Still missing / future work:
   compile errors.
 - A .so extension dlopen'd by Ruby **must call `rt_init()` itself** (see
   finding 9) — nothing runs D's runtime init for you.
+- GDC 14 rejects `&fn` as a template value argument; declare callable
+  template params as `alias` and pass the symbol BARE (finding 22).
+  String-mixin bodies resolve names at the MIXIN SITE, so a template
+  generating mixins must public-import every symbol its generated code
+  references (`public import` in rudy.objproto) or the user's module
+  fails on undefined identifiers.
 
 ## Build/test commands
 
 ```sh
 make exp            # build experiments
-make exp-test       # run all nine experiment suites
+make exp-test       # run all ten experiment suites
 ruby test/run.rb    # core dextest suite
 ```
