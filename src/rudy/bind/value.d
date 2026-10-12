@@ -120,6 +120,7 @@ VALUE rb_obj_class(VALUE obj);
 
 // hashes
 VALUE rb_hash_new();
+VALUE rb_hash_lookup2(VALUE hash, VALUE key, VALUE def);  // no Hash#default raise
 VALUE rb_hash_aset(VALUE hash, VALUE key, VALUE val);
 VALUE rb_hash_aref(VALUE hash, VALUE key);
 size_t rb_hash_size(VALUE hash);
@@ -202,6 +203,8 @@ VALUE rb_ensure(BodyFunc b_proc, VALUE data1, BodyFunc e_proc, VALUE data2);
 
 // per-object methods
 void  rb_define_singleton_method(VALUE obj, const(char)* mid, AnyMethod func, int arity);
+void  rb_define_private_method(VALUE klass, const(char)* mid, AnyMethod func, int arity);
+void  rb_define_protected_method(VALUE klass, const(char)* mid, AnyMethod func, int arity);
 
 // GVL (Ruby threading interop)
 alias void  function(void*) UnblockFunc;    // rb_unblock_function_t
@@ -258,6 +261,7 @@ extern __gshared VALUE rb_eLoadError;
 extern __gshared VALUE rb_eSystemExit;
 extern __gshared VALUE rb_eSysStackError;    // Ruby 4 exports rb_eSysStackError (rb_eSystemStackError never existed)
 extern __gshared VALUE rb_eZeroDivError;
+extern __gshared VALUE rb_eLocalJumpError;   // yield with no block / blk.call when none given
 
 // type tags (ruby_value_type) — subset rudy needs
 enum int RUBY_T_NONE    = 0x00;

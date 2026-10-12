@@ -1,6 +1,6 @@
 # Experiments — Findings & Notes
 
-Eight torture tests, all passing (`make exp-test`):
+Nine torture tests, all passing (`make exp-test`):
 
 | # | Experiment | What it tortures |
 |---|------------|------------------|
@@ -12,6 +12,7 @@ Eight torture tests, all passing (`make exp-test`):
 | 6 | `exp_exc` | Exception ping-pong: `rb_rescue`/`rb_ensure`/nested `rb_protect`, 50-level D↔Ruby mutual recursion with a raise at the bottom and rescue at the top, `rb_exc_raise` re-raising the *same* exception VALUE (identity check), all D-side counters intact after every longjmp unwind (19 assertions) |
 | 7 | `exp_compact` | GC compaction vs wrapped structs and registered globals: `GC.compact` moves ~1.4k objects while TypedData wrappers hold references to them. Negative control (no callbacks) collects referents and crashes the VM; guarded wrapper (`dmark`=`rb_gc_mark_movable` + `dcompact`=`rb_gc_location` rewrite) survives with identity preserved. Registered globals via `rb_gc_register_address` + `rb_gc_location` refresh (8 assertions + subprocess witness) |
 | 8 | `exp_convert` | Conversion-layer round trips: integers at ±2^63/2^64-1 boundaries, NaN/±0.0/inf, empty/NUL/binary/EUC-JP strings, frozen strings, 200-case binary fuzz, GC.stress mid-conversion, truthiness edges, hostile coercions (298 assertions; findings #12–#15) |
+| 9 | `exp_defargs` | `def!` argument-passing torture: blocks (call overloads, arity, reentrant `def!` inside a block body, raise-through-frame), `*rest` (bignum RangeError, empty-array semantics), `**kwargs` (symbol+string keys, D defaults, Raw!VALUE walk), `Self`, private/protected visibility, class singletons + per-object `def_singleton_on`, combined layouts (44 assertions; findings #16–#18) |
 
 ## Bugs found by the torture tests (and fixes)
 
@@ -139,6 +140,45 @@ Eight torture tests, all passing (`make exp-test`):
     trip on 18446744073709551615. **FIXED**: unsigned encode branch via
     the exported `rb_ull2inum` (nm-verified before binding).
 
+16. **rb_scan_args slot-mapping gotchas** (all hit while building the
+    uniform argc/argv trampoline for `def!`):
+    - *Optional slots must stay in PARAMETER order.* Emitting them in
+      scan order but appending the optionals after the mandatory block
+      misaligned argv → arguments arrived scrambled
+      (`"?, worldhowdy"`). posSlots = params in declaration order,
+      filtered to decodable slots.
+    - *rb_scan_args' vararg order is FORMAT order*, not the order you
+      think of the parameters: `*` (rest) first, then `:` (kwargs),
+      then `&` (block). Rest+block therefore needs TWO targets
+      (`&restAry, &tail`) — and KwArgs+RubyBlock can't coexist in one
+      function (a Hash/Proc split with identical get! semantics is
+      untestable, so it's static-assert'ed away).
+    - *A `*` slot fills an EMPTY ARRAY, not Qnil* when zero rest args
+      are passed. `Rest.empty` must be length-based; a Qnil-only check
+      lied.
+    - *`rb_const_get` resolves ONE constant per call* — `"A::B"` paths
+      need a `::`-splitter walk (def_singleton_on).
+
+17. **A plain `VALUE` return is converted as a MACHINE WORD.**
+    `to_ruby_value(VALUE)` sees a ulong alias, so a def!'d function
+    returning the array it built handed Ruby the integer 134926873159480.
+    Returning Ruby objects constructed in D requires a **`Raw!VALUE`
+    return type** (map_twice broke exactly this way). Related trap:
+    `KwArgs.to!(VALUE, string)` routes every VALUE through
+    `d_type!VALUE`/`d_type!ulong`, whose `rudy_check_unsigned` probes
+    negativity via `rb_num2dbl` — a String value dies with
+    `no implicit conversion to float from string`. **FIXED**:
+    `KwArgs.to` special-cases `Raw!VALUE` (bits unchanged, no decode) —
+    that's the escape hatch for walking raw keyword values.
+
+18. **A Ruby raise longjmps through D frames and SKIPS D cleanup.**
+    A block that raises while a D `scope(exit)` (or destructor) is
+    armed on the D frames below: the Ruby-side longjmp unwinds the C
+    stack and the D counter stayed 0 — `scope(exit)` never ran. This
+    is inherent to C-API longjmp unwinding (same class as "D exceptions
+    must never escape extern(C)"); not fixable D-side. Documented and
+    pinned as expected behavior (raise_walk in exp_defargs).
+
 ## ABI conformance audit (scripts/abi_audit.sh)
 
 `scripts/abi_audit.sh` diffs the `extern(C)` declarations in
@@ -204,6 +244,12 @@ Newly bound for the torture experiments (all in `rudy/bind/value.d`):
   `rb_gc_unregister_address` — GC rooting/movable-objects protocol (exp_compact;
   see finding 11)
 
+- `rb_eLocalJumpError` — exception class VALUE for `RubyBlock.call`'s
+  block-less contract (yield semantics: raise, don't NoMethodError)
+- `rb_define_private_method`, `rb_define_protected_method` — visibility
+  variants behind `def_private`/`def_protected` (were unbound; surfaced
+  by exp_defargs compiling them)
+
 Still missing / future work:
 
 - `rb_yield` family beyond what's bound; `rb_block_call` with data
@@ -222,7 +268,7 @@ Still missing / future work:
   (atomic-counted dfree); alloc/free balance 0 across 8 concurrent Ruby
   threads racing a D churn thread doing `new` + `GC.collect()` in a loop.
 
-## GDC-14 quirks catalog (from all six experiments)
+## GDC-14 quirks catalog (from the torture experiments)
 
 - Module variables are thread-local unless `__gshared`/`shared`.
 - `shared` counters need `atomicOp!"+="` (requires a `shared ref`); a plain
@@ -250,6 +296,6 @@ Still missing / future work:
 
 ```sh
 make exp            # build experiments
-make exp-test       # run all eight experiment suites
+make exp-test       # run all nine experiment suites
 ruby test/run.rb    # core dextest suite
 ```

@@ -4,7 +4,8 @@
 /// rb_thread_call_without_gvl, and the variadic (argc/argv) def! trampoline
 /// for D functions with default arguments.
 ///
-/// Also exercises def_singleton! and friends added to rudy.defs.
+/// Also exercises singleton-method registration via the raw
+/// rb_define_singleton_method API and the variadic def! trampoline.
 
 module dexitest;
 
