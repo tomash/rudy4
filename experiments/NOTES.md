@@ -1,6 +1,6 @@
 # Experiments — Findings & Notes
 
-Seven torture tests, all passing (`make exp-test`):
+Eight torture tests, all passing (`make exp-test`):
 
 | # | Experiment | What it tortures |
 |---|------------|------------------|
@@ -11,6 +11,7 @@ Seven torture tests, all passing (`make exp-test`):
 | 5 | `exp_gcstorm` | GC storm at the D↔Ruby seam: 48,100 malloc'd TypedData wrappers crossing the boundary while a D churn thread allocates and `GC.collect()`s in a loop; exact free-count accounting, alloc/free balance == 0 (no leak, no double free), idempotent churn control (9 assertions) |
 | 6 | `exp_exc` | Exception ping-pong: `rb_rescue`/`rb_ensure`/nested `rb_protect`, 50-level D↔Ruby mutual recursion with a raise at the bottom and rescue at the top, `rb_exc_raise` re-raising the *same* exception VALUE (identity check), all D-side counters intact after every longjmp unwind (19 assertions) |
 | 7 | `exp_compact` | GC compaction vs wrapped structs and registered globals: `GC.compact` moves ~1.4k objects while TypedData wrappers hold references to them. Negative control (no callbacks) collects referents and crashes the VM; guarded wrapper (`dmark`=`rb_gc_mark_movable` + `dcompact`=`rb_gc_location` rewrite) survives with identity preserved. Registered globals via `rb_gc_register_address` + `rb_gc_location` refresh (8 assertions + subprocess witness) |
+| 8 | `exp_convert` | Conversion-layer round trips: integers at ±2^63/2^64-1 boundaries, NaN/±0.0/inf, empty/NUL/binary/EUC-JP strings, frozen strings, 200-case binary fuzz, GC.stress mid-conversion, truthiness edges, hostile coercions (298 assertions; findings #12–#15) |
 
 ## Bugs found by the torture tests (and fixes)
 
@@ -101,6 +102,43 @@ Seven torture tests, all passing (`make exp-test`):
     survive fork); the corruption witness therefore runs as a re-exec'd
     subprocess (`system()`), not `fork()`.
 
+12. **`d_type!string` sliced a CHARACTER count as BYTES.**
+    `rb_str_strlen` returns an encoding-aware char count; `ptr[0..len].idup`
+    truncated every multibyte string ("héllo" = 6 bytes / 5 chars arrived as
+    4 bytes; EUC-JP lost ~40% of its data). Found by inspection, pinned by
+    exp_convert. **FIXED**: byte length now comes from Ruby itself —
+    `rb_funcallv(str, "bytesize")` with a lazily-interned ID. Sub-finding:
+    the natural fix `rb_str_bytes_len` is inline-macro-only, NOT exported
+    (symbol-lookup crash at dlopen locally; `scripts/abi_audit.sh` would
+    have caught it in CI — never bind a name you have not nm-verified).
+
+13. **int/uint params decoded through unchecked wide paths.**
+    The static-if chain tested `is(T : C_longlong)` (subtype) before any
+    exact int branch, so `d_type!int` ran `rb_num2long` + cast: 2^31
+    silently wrapped to -2147483648, 2^100 to garbage. Property tests
+    also exposed the family's float behavior: `rb_num2long(42.5) == 42`
+    (truncation, same as Ruby's own Integer()) and negatives wrapping
+    2's-complement style through the unsigned converters. **FIXED**:
+    exact types decode first through the range-checked EXPORTED converters
+    `rb_num2int`/`rb_num2uint` (RangeError on overflow, FloatDomainError
+    on NaN/inf — NUM2INT semantics), and every unsigned target rejects
+    negatives via `rudy_check_unsigned` (sign probed through rb_num2dbl,
+    because rb_num2long itself raises on 2^64-1).
+
+14. **`d_type!bool` decoded as `val == Qtrue_`.**
+    Ruby considers `0`, `0.0`, `""`, `[]`, `:sym` truthy (RUBY_TEST);
+    they decoded as D `false`, breaking the invariant "arguments convert
+    the way Ruby sees them". **FIXED**: `val != Qnil_ && val != Qfalse_`
+    (RUBY_TEST semantics); all truthiness edges pinned in exp_convert.
+    Documented: a `bool` param of a def!'d function means "Ruby
+    truthiness", not "exactly true".
+
+15. **`to_ruby_value!ulong` encoded through the SIGNED path.**
+    `rb_ll2inum(cast(long) 2^64-1)` produced -1 (round trip FAILED for
+    the top half of the ulong domain). Found by the exp_convert round
+    trip on 18446744073709551615. **FIXED**: unsigned encode branch via
+    the exported `rb_ull2inum` (nm-verified before binding).
+
 ## ABI conformance audit (scripts/abi_audit.sh)
 
 `scripts/abi_audit.sh` diffs the `extern(C)` declarations in
@@ -145,6 +183,17 @@ Verified exported by libruby but **not yet bound** in `rudy/bind/value.d`:
 
 Newly bound for the torture experiments (all in `rudy/bind/value.d`):
 
+- `rb_ull2inum`, `rb_uint2inum` — unsigned encode path for ulong/C_ulonglong
+  (finding #15: rb_ll2inum(cast(long)) turned 2^64-1 into -1)
+- `rb_num2int`, `rb_num2uint` — the range-checked EXPORTED converters
+  (finding #13: NUM2INT semantics, RangeError on overflow); note their
+  _inline variants exist in headers but were NOT needed
+- `rb_obj_is_instance_of` — the exported way to type-test without the
+  rb_type macro (used for float detection before numeric coercion)
+- DELIBERATELY NOT bound: `rb_str_bytes_len` — inline-macro-only in
+  rstring.h, NOT exported (dlopen symbol-lookup crash; see finding #12).
+  Byte length goes through String#bytesize via rb_funcallv instead.
+
 - `rb_exc_raise` — re-raise the *same* exception VALUE from D (noreturn;
   callers need `assert(0)` after it to satisfy GDC's no-return analysis)
 - `rb_int2inum` — ABI fix: the C header declares `intptr_t`, the old binding
@@ -183,6 +232,10 @@ Still missing / future work:
 - D exceptions must never escape an extern(C) frame or a no-GVL callback —
   catch in D, re-raise Ruby-side after re-acquiring the GVL.
 - noreturn Ruby APIs (`rb_raise`, `rb_exc_raise`) need `assert(0)` after the
+- A Ruby raise (rb_raise longjmps) is NOT a D exception: try/catch in an
+  extern(C) body cannot intercept it, and D exceptions must never cross
+  back into Ruby. Validate before raising, or let Ruby see the raise at
+  its own boundary (exp_convert verified depth-2 raise/rescue).
   call — GDC's no-return analysis flags functions that "fall off the end"
   otherwise.
 - `import` statements can't appear mid-function; put them at module scope
@@ -197,6 +250,6 @@ Still missing / future work:
 
 ```sh
 make exp            # build experiments
-make exp-test       # run all six experiment suites
+make exp-test       # run all eight experiment suites
 ruby test/run.rb    # core dextest suite
 ```
