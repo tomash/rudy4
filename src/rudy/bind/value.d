@@ -76,13 +76,18 @@ VALUE rb_obj_alloc(VALUE klass);
 long  rb_num2long(VALUE);
 long  rb_num2ll(VALUE);
 double rb_num2dbl(VALUE);
+VALUE rb_ull2inum(C_ulonglong);
+VALUE rb_uint2inum(C_ulong);
 ulong rb_num2ulong(VALUE);
 VALUE rb_ll2inum(long);
+int   rb_num2int(VALUE);    // raises RangeError outside int range
+uint  rb_num2uint(VALUE);    // raises RangeError outside uint range
 VALUE rb_int2inum(C_long);   // C ABI: intptr_t — was misbound as int (torture
                               // finding #4: wrong width silently truncates on
                               // SysV x86-64 because of register reuse)
 VALUE rb_float_new(double);
 double rb_float_value(VALUE);
+VALUE rb_obj_is_instance_of(VALUE, VALUE);   // exported; rb_type is macro-only
 VALUE rb_Integer(VALUE);
 
 // strings
@@ -97,7 +102,6 @@ VALUE rb_string_value(VALUE* value);
 /// contents, hence volatile). See rstring.h:289.
 char* rb_string_value_ptr(VALUE* ptr);
 const(char)* rb_string_value_cstr(VALUE str);
-long  rb_str_length(VALUE);
 long  rb_str_strlen(VALUE);
 VALUE rb_str_to_str(VALUE str);
 VALUE rb_obj_as_string(VALUE obj);

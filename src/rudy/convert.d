@@ -44,6 +44,34 @@ template isDynamicArrayType(T)  { enum bool isDynamicArrayType = isDynamicArray!
 template isStaticArrayType(T)   { enum bool isStaticArrayType = isStaticArray!T; }
 template isAssocArrayType(T)    { enum bool isAssocArrayType = is(T == V[K], V, K); }
 
+/// Byte length of a Ruby String, the exported-API way. History: the old
+/// code sliced rb_str_strlen (a CHARACTER count) as a byte count —
+/// truncating every multibyte string (finding #12) — and the natural fix
+/// target rb_str_bytes_len turned out to be inline-macro-only, NOT
+/// exported (caught locally by a symbol-lookup crash; the ABI audit would
+/// have caught it in CI). Ruby's own String#bytesize is the exact answer;
+/// rb_intern lazily, idempotently (VM is alive inside any method call).
+private __gshared ID rudy_id_bytesize;
+
+private long rudy_bytesize(VALUE str)
+{
+    if (!rudy_id_bytesize)
+        rudy_id_bytesize = rb_intern("bytesize");
+    return cast(long) rb_num2ll(rb_funcallv(str, rudy_id_bytesize, 0, null));
+}
+
+/// Reject negative values where the D target type is unsigned: the
+/// numeric family (rb_num2ulong / rb_num2uint) would otherwise wrap
+/// them 2's-complement style (-1 arrived as 2^64-1, finding #13 family).
+private void rudy_check_unsigned(VALUE val)
+{
+    // Sign via double: rb_num2long would itself raise on values above
+    // LONG_MAX (2^64-1 is a legitimate ulong). Sign survives the cast;
+    // NaN/inf fail the comparison and get caught by num2ulong below.
+    if (rb_num2dbl(val) < 0)
+        rb_raise(rb_eRangeError, "negative value not convertible to unsigned D type");
+}
+
 /// Require a Ruby feature (e.g. "complex") before using it from D.
 private void rb_require_c(string name)
 {
@@ -64,6 +92,13 @@ VALUE to_ruby_value(T)(T t)
 
     else static if (is(T == char))
         return rb_int2inum(t);
+
+    else static if (is(T == ulong) || is(T == C_ulonglong))
+        return rb_ull2inum(cast(C_ulonglong) t);   // unsigned encode path —
+                                                   // the old signed
+                                                   // rb_ll2inum(cast(long))
+                                                   // turned 2^64-1 into -1
+                                                   // (finding #15)
 
     else static if (is(T : C_longlong))
         return rb_ll2inum(cast(long) t);
@@ -116,28 +151,58 @@ VALUE to_ruby_value(T)(T t)
 // ---------------------------------------------------------------- d_type
 
 /// Convert a Ruby VALUE into a native D type T.
+///
+/// Numeric decode order matters: EXACT types must be tested before the
+/// subtype branches they would otherwise fall into — is(T : C_longlong)
+/// matches int too, and the old chain let `int` decode through the
+/// unchecked-wide path. Each exact type now gets Ruby's own
+/// range-checked converter: rb_num2int/rb_num2uint raise RangeError on
+/// overflow (finding #13: silent wraparound before), fractional floats
+/// truncate toward zero and NaN/inf raise FloatDomainError — exactly
+/// NUM2INT/NUM2UINT/Integer() semantics (finding #14).
 T d_type(T)(VALUE val)
 {
-    static if (is(T == bool))            return val == Qtrue_;
-
+    static if (is(T == bool))
+    {
+        // RUBY_TEST (RTEST) semantics: nil/false are false, everything
+        // else — 0, 0.0, "" — is true, matching Ruby's own truthiness.
+        // (The old `val == Qtrue_` made Ruby truthy 0 decode as D false.)
+        return val != Qnil_ && val != Qfalse_;
+    }
     else static if (is(T == string))
     {
         VALUE str = rb_str_to_str(val);
-        auto len = rb_str_strlen(str);
         auto ptr = rb_string_value_ptr(&str);   // may swap str in-place
-        return ptr[0 .. len].idup;
+        return ptr[0 .. rudy_bytesize(str)].idup;   // BYTE length, not chars
+                                                    // (finding #12)
     }
 
-    else static if (is(T : C_ulonglong) || is(T == ulong))
-        return cast(T) rb_num2ulong(val);  // VALUE is aliased to ulong;
-                                           // a ulong param still means
+    // exact unsigned machine words first (VALUE itself is a ulong alias)
+    else static if (is(T == ulong) || is(T == C_ulonglong))
+    {
+        rudy_check_unsigned(val);          // -1 must raise, not wrap
+        return cast(T) rb_num2ulong(val);
+    }  // a ulong param still means
                                            // "Ruby Integer -> machine word",
                                            // NOT raw passthrough
+    else static if (is(T == int))
+        return cast(T) rb_num2int(val);    // range-checked (finding #13)
+    else static if (is(T == uint))
+    {
+        rudy_check_unsigned(val);
+        return cast(T) rb_num2uint(val);   // range-checked (finding #13)
+    }
 
-    else static if (is(T : C_longlong))  return cast(T) rb_num2ll(val);
-    else static if (is(T : C_long))      return cast(T) rb_num2long(val);
-    else static if (is(T : int))         return cast(T) rb_num2long(val);
-    else static if (is(T : uint))        return cast(T) rb_num2ulong(val);
+    // remaining signed subtypes (long, char, short...): wide is fine
+    else static if (is(T : C_longlong))
+        return cast(T) rb_num2ll(val);
+
+    // remaining unsigned subtypes (ubyte, ushort...): range-checked
+    else static if (is(T : uint))
+    {
+        rudy_check_unsigned(val);
+        return cast(T) rb_num2uint(val);
+    }
 
     else static if (is(T : double))
         return cast(T) rb_num2dbl(val);

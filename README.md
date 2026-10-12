@@ -65,9 +65,19 @@ To receive a raw, unconverted `VALUE`, declare the parameter (or return
 type) as `Raw!VALUE` — passthrough is opt-in since `VALUE` is an `ulong`
 alias and a plain `ulong` param means "decode me".
 
+Conversion semantics worth knowing (pinned by `exp_convert`):
+- `bool` follows **Ruby truthiness** (`nil`/`false` → `false`, everything
+  else — including `0` and `""` — → `true`), matching how Ruby itself
+  sees the argument.
+- `string` decodes the full byte content (`String#bytesize` bytes), not
+  the character count — multibyte and binary strings survive intact.
+- `int`/`uint` decode through the range-checked converters: out-of-range
+  values raise `RangeError` instead of silently wrapping; unsigned D
+  types also reject negative inputs.
+
 ### D gotchas
 
-The torture experiments found **ten** D-specific traps; the full catalog
+The torture experiments found **twelve** D-specific traps; the full catalog
 with fixes lives in experiments/NOTES.md. The ones that will bite you on
 day one:
 
@@ -169,7 +179,7 @@ src/rudy/typeddata.d    RudyTypedData mixin: wrap D structs as Ruby objects
 src/dextest.d           acceptance-test extension (old "dexter" revived)
 src/dexitest.d          missing-API bindings acceptance extension
 src/dtypetest.d         typed-data acceptance extension
-experiments/           six torture experiments (see experiments/NOTES.md)
+experiments/           seven torture experiments (see experiments/NOTES.md)
 test/run.rb             Ruby-side acceptance suite (22 assertions)
 test/exitest.rb         bindings acceptance suite (31 assertions)
 test/typedtest.rb       typed-data acceptance suite (9 assertions)
@@ -189,12 +199,14 @@ functions (`rb_string_value_ptr`, `rb_float_value`, `rb_ary_entry`, ...).
 
 ## Torture experiments (`experiments/`)
 
-Six torture experiments probe the D↔Ruby seam far past what the acceptance
+Seven experiments probe the D↔Ruby seam far past what the acceptance
 suites cover — GVL-released blocking I/O with a hand-written TCP server,
 48k-object TypedData GC storms against a concurrent `GC.collect()` churn
 thread, 50-level exception ping-pong with `rb_rescue`/`rb_ensure`/nested
-`rb_protect` and `rb_exc_raise` identity, perf, and more. They found ten real
-bugs (ABI widths, a missing `rt_init()`, thread-local-by-default module
+`rb_protect` and `rb_exc_raise` identity, perf, and conversion round trips
+across every supported D type (integers at ±2^63/2^64-1, NaN/inf,
+multibyte/binary/invalid-encoding strings, GC.stress at the seam). They found
+twelve real bugs (ABI widths, a missing `rt_init()`, thread-local-by-default module
 state, a TypedData free-callback routing bug, ...), all documented with
 fixes in **experiments/NOTES.md** — that file is the real catalog of
 D-specific traps when writing Ruby extensions. Run them with `make exp`
@@ -205,8 +217,8 @@ then `make exp-test`.
 ```sh
 make        # builds .build/dextest.so, .build/dexitest.so and .build/dtypetest.so
 make test   # runs test/run.rb + test/exitest.rb + test/typedtest.rb (62 assertions)
-make exp    # builds the six experiment extensions (experiments/)
-make exp-test  # runs all six torture suites (66 assertions, see experiments/NOTES.md)
+make exp    # builds the seven experiment extensions (experiments/)
+make exp-test  # runs all seven torture suites (364 assertions, see experiments/NOTES.md)
 ```
 
 The Makefile finds Ruby via `ruby -e` hdrdir/libdir queries (works with
