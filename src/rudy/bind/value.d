@@ -117,6 +117,7 @@ VALUE rb_ary_store(VALUE ary, long idx, VALUE item);
 VALUE rb_ary_join(VALUE ary, VALUE sep);
 VALUE rb_ary_to_s(VALUE ary);
 VALUE rb_obj_class(VALUE obj);
+const(char)* rb_class2name(VALUE klass);   // exported (class.c); name of class/module
 
 // hashes
 VALUE rb_hash_new();
@@ -139,6 +140,10 @@ VALUE rb_id2sym(ID);
 VALUE rb_sym2str(VALUE sym);
 const(char)* rb_id2name(ID);
 VALUE rb_obj_frozen_p(VALUE obj);
+void  rb_check_frozen(VALUE obj);          // raises FrozenError when frozen
+VALUE rb_obj_freeze(VALUE obj);            // returns self, sets FL_FREEZE
+int   rb_typeddata_is_kind_of(VALUE obj, in void* data_type); // non-raising
+                                            // (check_typeddata raises; this doesn't)
 
 // exceptions / control flow
 // (rb_raise/rb_fatal never return; D has no `noreturn` attribute for extern(C))
@@ -233,7 +238,10 @@ VALUE rb_data_object_wrap(VALUE klass, void* ptr,
 alias size_t function(const void*) RUBY_DATA_FUNC_DSIZE;
 VALUE rb_data_typed_object_wrap(VALUE klass, void* ptr, in void* data_type);
 void* rb_check_typeddata(VALUE obj, in void* data_type);
-void* rb_data_typed_object_zalloc(VALUE klass, in void* data_type);
+// NB: the C prototype is (VALUE klass, size_t size, const rb_data_type_t*)
+// — the pre-audit binding dropped `size` and silently worked through
+// register reuse (finding #21). Signature now matches the header.
+void* rb_data_typed_object_zalloc(VALUE klass, size_t size, in void* data_type);
 
 // ---------------------------------------------------------------- globals
 
@@ -262,6 +270,7 @@ extern __gshared VALUE rb_eSystemExit;
 extern __gshared VALUE rb_eSysStackError;    // Ruby 4 exports rb_eSysStackError (rb_eSystemStackError never existed)
 extern __gshared VALUE rb_eZeroDivError;
 extern __gshared VALUE rb_eLocalJumpError;   // yield with no block / blk.call when none given
+extern __gshared VALUE rb_eFrozenError;      // rb_check_frozen on a frozen object
 
 // type tags (ruby_value_type) — subset rudy needs
 enum int RUBY_T_NONE    = 0x00;
