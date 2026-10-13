@@ -1,7 +1,16 @@
+# rudy4 build artifacts
 .build/
+.build.asan/
 *.so
 *.o
 *.d.o
 dextest_gem-*.gem
 .bundle/
 tmp/
+
+# examples/hello_gem build artifacts
+examples/hello_gem/hello_gem-*.gem
+examples/hello_gem/ext/hello_gem/Makefile
+examples/hello_gem/ext/hello_gem/*.so
+examples/hello_gem/ext/hello_gem/*.o
+examples/hello_gem/lib/*.so
