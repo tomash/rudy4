@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-13
+
 ### Added
 
 - **The `rudy4` gem** (`rudy4.gemspec`, `lib/rudy4/`, `bin/rudy4`) — packages
@@ -38,6 +40,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Ruby `*args`, and a dynamic-array *return* (`double[] squares(long n)`),
   alongside `long`/`string`/`bool`.
 
+## [0.1.1] - 2026-10-13
 
 ### Added
 
@@ -105,6 +108,7 @@ See `experiments/NOTES.md` for the full catalogue. Highlights:
 - Forking after a D-runtime-initialized `.so` is loaded is unsafe — use a
   subprocess re-exec for crash-witness tests.
 
-[Unreleased]: https://github.com/tomash/rudy4/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/tomash/rudy4/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/tomash/rudy4/releases/tag/v0.2.0
 [0.1.1]: https://github.com/tomash/rudy4/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/tomash/rudy4/releases/tag/v0.1.0
