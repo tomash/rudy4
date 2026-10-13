@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`exp_nonregression`** (`experiments/exp_nonregression.d` +
+  `test_exp_nonregression.rb`, 20 assertions) — evidence for the three
+  documented non-goals: Fiber switches through D frames, Ractor
+  non-shareability (asserted VM refusal), and interruptibility of a long
+  GVL-held D call vs the GVL-released variant. Findings #25–#27 in
+  `experiments/NOTES.md`.
+- **README "Known limitations (non-goals)"** section and a matching
+  `experiments/NOTES.md` section, so the boundaries are stated up front
+  instead of being discoverable only by reading the experiment notes.
+
 ## [0.1.0] - 2026-10-13
 
 First tagged release: rudy4 revival targeting Ruby 4.0 and GDC 14.
