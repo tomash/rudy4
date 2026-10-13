@@ -48,3 +48,20 @@ jobs:
         run: |
           export PATH=/opt/ruby/bin:$PATH
           bash examples/hello_gem/test/smoke.sh /opt/ruby/bin/ruby
+
+      - name: rudy4 gem (vendored sources in sync + CLI suite)
+        run: |
+          export PATH=/opt/ruby/bin:$PATH
+          make vendor-check
+          make RUBY=/opt/ruby/bin/ruby GDC=gdc-14 gem-test
+
+      - name: rudy4 gem end-to-end (scaffold a project, compile it with GDC)
+        run: |
+          export PATH=/opt/ruby/bin:$PATH
+          make RUBY=/opt/ruby/bin/ruby GDC=gdc-14 gem-test-full
+
+      - name: rudy4 gem build
+        run: |
+          export PATH=/opt/ruby/bin:$PATH
+          gem build rudy4.gemspec
+          test -f rudy4-*.gem

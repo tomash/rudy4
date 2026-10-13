@@ -8,6 +8,9 @@ dextest_gem-*.gem
 .bundle/
 tmp/
 
+# rudy4 gem
+rudy4-*.gem
+
 # examples/hello_gem build artifacts
 examples/hello_gem/hello_gem-*.gem
 examples/hello_gem/ext/hello_gem/Makefile
