@@ -228,6 +228,11 @@ GVL bindings are additionally tortured by `experiments/exp_exc` and
 ## Layout
 
 ```
+lib/rudy4/              the rudy4 gem: CLI, generator, doctor, templates
+bin/rudy4               the rudy4 command
+vendor/rudy/            vendored copy of src/rudy/ (shipped in the gem)
+rudy4.gemspec           the gem itself
+scripts/vendor_sync.sh  src/rudy/ -> vendor/rudy/  (vendor_check.sh guards drift)
 src/rudy/bind/value.d   hand-written binding to the Ruby 4.0 C API
 src/rudy/convert.d      to_ruby_value!(T) / d_type!(T) conversions
 src/rudy/defs.d         def! templates + extern(C) trampolines
@@ -238,6 +243,7 @@ src/dexitest.d          missing-API bindings acceptance extension
 src/dtypetest.d         typed-data acceptance extension
 experiments/           eleven torture experiments (see experiments/NOTES.md)
 examples/hello_gem/    gem-shaped extension example (gemspec + ext/ + lib/)
+test/rudy4_test.rb      the gem's own suite (scaffold / doctor / vendor)
 test/run.rb             Ruby-side acceptance suite (22 assertions)
 test/exitest.rb         bindings acceptance suite (31 assertions)
 test/typedtest.rb       typed-data acceptance suite (9 assertions)
@@ -249,6 +255,31 @@ API is mostly opaque `VALUE` + function calls, so ~200 lines of hand-picked
 accesses (`RSTRING(str).ptr`) are gone — everything goes through exported
 functions (`rb_string_value_ptr`, `rb_float_value`, `rb_ary_entry`, ...).
 
+## Getting started: the `rudy4` gem
+
+The fastest way in is the `rudy4` gem. It scaffolds a self-contained
+extension gem — the rudy4 D library is copied into it, so the project builds
+with nothing but GDC and your Ruby headers, no checkout and no `RUDY4_ROOT`:
+
+```sh
+gem install rudy4
+rudy4 doctor              # checks Ruby + headers + GDC, then compiles a probe
+rudy4 init fast_math      # writes a small extension gem
+cd fast_math
+rake compile              # GDC builds ext/fast_math/fast_math.d
+rake test                 # 7 assertions against the compiled extension
+```
+
+Now edit `ext/fast_math/fast_math.d` and repeat `rake compile && rake test`.
+The generated project is a normal gem: add it to another app as a path gem,
+or `gem build` and publish it — RubyGems will compile the D source at install
+time.
+
+`rudy4 doctor` is the thing to run when a build fails: it verifies the Ruby
+toolchain, reports the GDC version, and then *proves* the setup by scaffolding
+and compiling a throwaway extension, so a failure names the missing piece
+instead of dumping compiler output.
+
 ## Requirements
 
 - Ruby 4.0 (any install with `libruby` and headers)
@@ -257,22 +288,36 @@ functions (`rb_string_value_ptr`, `rb_float_value`, `rb_ary_entry`, ...).
 
 ## Packaging: shipping a D-backed gem
 
-Everything under `src/` and `experiments/` is acceptance-test shaped.
-`examples/hello_gem/` is the counter-example: a real gem layout
-(`hello_gem.gemspec` + `ext/` + `lib/`) whose native half is written in D
-and compiled by GDC through a `mkmf`-stand-in `extconf.rb`. It builds,
-installs, and requires like any C extension:
+Two worked examples, in order of usefulness:
 
-```sh
-cd examples/hello_gem
-bash test/smoke.sh                              # build + 17 assertions
-gem build hello_gem.gemspec
-RUDY4_ROOT=/path/to/rudy4 gem install ./hello_gem-0.1.0.gem
-ruby -e 'require "hello_gem"; puts add(2, 3)'
-```
+1. **`rudy4 init NAME`** (the `rudy4` gem, above) — the recommended path. It
+   writes a project whose `ext/NAME/rudy/` is a *vendored copy* of the rudy4 D
+   library, so it builds and installs with no reference to a rudy4 checkout.
+2. **`examples/hello_gem/`** — the in-repo reference for what that generated
+   layout can contain (wrapped D struct, object protocol, freeze-aware
+   mutators). It predates the gem and finds its sources by walking up to a
+   checkout (`RUDY4_ROOT`), so it is a development example, not the first-run
+   path:
 
-See `examples/hello_gem/README.md` for how the extconf.rb trick works and
-why installing outside the repo needs `RUDY4_ROOT`.
+   ```sh
+   cd examples/hello_gem
+   bash test/smoke.sh                              # build + 17 assertions
+   gem build hello_gem.gemspec
+   RUDY4_ROOT=/path/to/rudy4 gem install ./hello_gem-0.1.0.gem
+   ruby -e 'require "hello_gem"; puts add(2, 3)'
+   ```
+
+   See `examples/hello_gem/README.md` for how the extconf.rb trick works and
+   why installing from outside the repo needs `RUDY4_ROOT`.
+
+### The `rudy4` gem itself
+
+`lib/rudy4/`, `bin/rudy4`, `vendor/rudy/` and `rudy4.gemspec` are the gem:
+`init` (scaffolder), `doctor` (toolchain check + build probe), `vendor`
+(re-copy the D library into an existing project). `vendor/rudy/` is generated
+from `src/rudy/` by `scripts/vendor_sync.sh`; CI runs
+`scripts/vendor_check.sh` and fails if the two drift, so `src/rudy/` stays the
+single source of truth.
 
 ## Torture experiments (`experiments/`)
 
@@ -319,11 +364,15 @@ silence (see NOTES.md findings #25–#27):
 ## Build & test
 
 ```sh
-make        # builds .build/dextest.so, .build/dexitest.so and .build/dtypetest.so
-make test   # runs test/run.rb + test/exitest.rb + test/typedtest.rb (62 assertions)
-make exp    # builds the eleven experiment extensions (experiments/)
+make           # builds .build/dextest.so, .build/dexitest.so and .build/dtypetest.so
+make test      # runs test/run.rb + test/exitest.rb + test/typedtest.rb (62 assertions)
+make exp       # builds the eleven experiment extensions (experiments/)
 make exp-test  # runs all eleven torture suites (452 assertions, see experiments/NOTES.md)
 make memcheck  # ASan subset: builds .build.asan and runs the rt_init-free suites
+
+make gem-test       # the rudy4 gem's own suite (scaffold / doctor / vendor, 136 assertions)
+make gem-test-full  # + scaffolds a project and compiles it with GDC, end to end
+make vendor-check   # fails if vendor/rudy/ has drifted from src/rudy/
 ```
 
 The Makefile finds Ruby via `ruby -e` hdrdir/libdir queries (works with

@@ -33,7 +33,7 @@ EXP_SRCS := exp_wrap exp_cross exp_perf exp_http exp_gcstorm exp_exc exp_compact
 # rt_init-free subset that works under ASan (NOTES.md #23/#24).
 ASAN_EXP_SRCS := exp_wrap exp_cross exp_perf exp_exc exp_defargs exp_http
 
-.PHONY: all clean test check typed-test exp exp-test exp-asan exp-asan-test memcheck
+.PHONY: all clean test check typed-test exp exp-test exp-asan exp-asan-test memcheck vendor vendor-check gem-test gem-test-full gem-build
 
 all: $(BUILD)/dextest.so $(BUILD)/dexitest.so $(BUILD)/dtypetest.so
 
@@ -110,6 +110,28 @@ test: all
 	$(RUBY) test/typedtest.rb
 
 check: test
+
+# --- the rudy4 gem ----------------------------------------------------------
+#
+# vendor/rudy/ is a copy of src/rudy/ shipped inside the gem; `vendor-check`
+# fails if the two have drifted (CI runs it), `gem-test` covers the CLI, and
+# `gem-test-full` also scaffolds + compiles a project with GDC.
+$(BUILD)/vendor-synced: $(DC_SRCS)
+	@bash scripts/vendor_sync.sh
+
+vendor: $(BUILD)/vendor-synced
+
+vendor-check:
+	@bash scripts/vendor_check.sh
+
+gem-test:
+	$(RUBY) -Ilib test/rudy4_test.rb
+
+gem-test-full:
+	RUDY4_FULL=1 $(RUBY) -Ilib test/rudy4_test.rb
+
+gem-build: vendor-check
+	gem build rudy4.gemspec
 
 clean:
 	rm -rf .build .build.asan

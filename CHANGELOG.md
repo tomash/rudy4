@@ -6,7 +6,38 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.1.1] - 2026-10-13
+### Added
+
+- **The `rudy4` gem** (`rudy4.gemspec`, `lib/rudy4/`, `bin/rudy4`) — packages
+  rudy4 as a command, not a repo to clone. The gem ships the D library under
+  `vendor/rudy/` so a generated project builds with no rudy4 checkout and no
+  `RUDY4_ROOT`.
+  - `rudy4 init NAME` scaffolds a self-contained extension gem (gemspec,
+    `lib/`, `ext/NAME/` with the *vendored* `rudy/` sources, `Rakefile`,
+    `test/`) and prints the compile/test next steps.
+  - `rudy4 doctor` verifies the Ruby toolchain, headers, shared libruby and
+    GDC — then proves the setup by scaffolding and compiling a throwaway
+    extension, so failures name the missing piece. Untested Ruby majors and
+    pre-13 GDC are warnings, not refusals.
+  - `rudy4 vendor` re-copies the D library into an existing project after a
+    gem upgrade (`src/rudy/` stays the source of truth).
+- `scripts/vendor_sync.sh` / `scripts/vendor_check.sh` — keep `vendor/rudy/`
+  in step with `src/rudy/`; CI fails on drift.
+- `test/rudy4_test.rb` — the gem's suite (136 assertions: scaffold contents,
+  argument validation, `--force`, vendor refresh, doctor
+  pass/fail). `RUDY4_FULL=1` additionally scaffolds a project and drives
+  `rake test` inside it with GDC (143 assertions, `make gem-test-full`).
+- `make gem-test` / `gem-test-full` / `vendor` / `vendor-check` / `gem-build`.
+
+### Fixed
+
+- The scaffolded template no longer demonstrates array *parameters*
+  (`double[] xs`) — `d_type` has no array/AA decode path, so that template
+  would have failed to compile. The generated D file now uses the paths that
+  are actually supported: D default values for optional arguments, `Rest` for
+  Ruby `*args`, and a dynamic-array *return* (`double[] squares(long n)`),
+  alongside `long`/`string`/`bool`.
+
 
 ### Added
 
