@@ -43,3 +43,8 @@ jobs:
         run: |
           export PATH=/opt/ruby/bin:$PATH
           bash scripts/abi_audit.sh /opt/ruby/bin/ruby
+
+      - name: Packaging example (examples/hello_gem)
+        run: |
+          export PATH=/opt/ruby/bin:$PATH
+          bash examples/hello_gem/test/smoke.sh /opt/ruby/bin/ruby

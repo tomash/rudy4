@@ -418,4 +418,37 @@ make exp-test       # run all ten experiment suites
 ruby test/run.rb    # core dextest suite
 make memcheck       # ASan subset (rt_init-free exps; NOTES #23/#24)
 bash scripts/memcheck.sh   # same, standalone (CI-friendly)
+bash examples/hello_gem/test/smoke.sh  # packaging example build + 17 assertions
 ```
+
+## Packaging a real extension (examples/hello_gem)
+
+The torture experiments and `src/dextest.d` are acceptance-test shaped.
+`examples/hello_gem/` is the shippable counter-example: a gemspec + `ext/` +
+`lib/` layout whose native half is D and compiled by GDC.
+
+Key mechanism: RubyGems' native-extension protocol is **language-agnostic** —
+it runs `extconf.rb`, expects a `Makefile` with `all` + `install` targets,
+and runs them. The example's `extconf.rb` queries `RbConfig` for the Ruby
+header/lib dirs exactly like `mkmf`, then emits a Makefile whose compiler is
+`gdc-14` and whose sources are the `.d` files. Ruby never learns the
+language was D.
+
+```
+examples/hello_gem/
+  hello_gem.gemspec            extensions = ["ext/hello_gem/extconf.rb"]
+  lib/hello_gem.rb             requires "hello_gem_ext"; pure-Ruby helpers
+  lib/hello_gem/version.rb
+  ext/hello_gem/hello_gem.d    def! functions + RudyTypedData/Protocol Vec2
+  ext/hello_gem/extconf.rb     emits the gdc-driven Makefile
+  test/smoke.sh                build + 17-assertion end-to-end check
+```
+
+Verified locally: `bash test/smoke.sh` (17/17), `gem build`, and
+`RUDY4_ROOT=<checkout> gem install ./hello_gem-0.1.0.gem` → `require
+"hello_gem"` works under asdf ruby 4.0.7 / gdc-14. Installing outside the
+repo needs `RUDY4_ROOT` (the in-repo path auto-detection only holds in a
+checkout); a published gem would vendor `src/rudy` instead.
+
+Note: the native artifact is named `hello_gem_ext.so` (not `hello_gem.so`)
+so it does not shadow the `lib/hello_gem.rb` wrapper on the load path.

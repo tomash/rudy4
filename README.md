@@ -237,6 +237,7 @@ src/dextest.d           acceptance-test extension (old "dexter" revived)
 src/dexitest.d          missing-API bindings acceptance extension
 src/dtypetest.d         typed-data acceptance extension
 experiments/           ten torture experiments (see experiments/NOTES.md)
+examples/hello_gem/    gem-shaped extension example (gemspec + ext/ + lib/)
 test/run.rb             Ruby-side acceptance suite (22 assertions)
 test/exitest.rb         bindings acceptance suite (31 assertions)
 test/typedtest.rb       typed-data acceptance suite (9 assertions)
@@ -253,6 +254,25 @@ functions (`rb_string_value_ptr`, `rb_float_value`, `rb_ary_entry`, ...).
 - Ruby 4.0 (any install with `libruby` and headers)
 - GDC ≥ 13 (tested: gdc-14 14.2.0, D front-end 2.10x)
 - GNU make
+
+## Packaging: shipping a D-backed gem
+
+Everything under `src/` and `experiments/` is acceptance-test shaped.
+`examples/hello_gem/` is the counter-example: a real gem layout
+(`hello_gem.gemspec` + `ext/` + `lib/`) whose native half is written in D
+and compiled by GDC through a `mkmf`-stand-in `extconf.rb`. It builds,
+installs, and requires like any C extension:
+
+```sh
+cd examples/hello_gem
+bash test/smoke.sh                              # build + 17 assertions
+gem build hello_gem.gemspec
+RUDY4_ROOT=/path/to/rudy4 gem install ./hello_gem-0.1.0.gem
+ruby -e 'require "hello_gem"; puts add(2, 3)'
+```
+
+See `examples/hello_gem/README.md` for how the extconf.rb trick works and
+why installing outside the repo needs `RUDY4_ROOT`.
 
 ## Torture experiments (`experiments/`)
 
@@ -306,6 +326,6 @@ make test RUBY=~/.asdf/installs/ruby/4.0.7/bin/ruby
 
 ## License
 
-MIT (as the original).
+MIT — see [LICENSE](LICENSE) (as the original rudy).
 {"id":"68e8e704-0284-4ad5-a0cb-bb18d9e07247","session_id":"9621158e975c2a39","timestamp":"2026-10-12T11:17:34+00:00","model":"openrouter/auto","provider":"openrouter","prompt_tokens":29562,"completion_tokens":18,"cache_read_tokens":29184,"cache_write_tokens":0,"cost_usd":0.0015249,"cost_source":"api"}
 {"id":"36b596c4-88a5-498a-9bb5-d502dee57cc1","session_id":"86e7421794b3de46","timestamp":"2026-10-12T12:11:19+00:00","model":"openrouter/auto","provider":"openrouter","prompt_tokens":14236,"completion_tokens":65,"cache_read_tokens":0,"cache_write_tokens":0,"cost_usd":0.0021679,"cost_source":"api"}
