@@ -1,8 +1,25 @@
 # rudy4
 
+[![Gem Version](https://img.shields.io/gem/v/rudy4.svg)](https://rubygems.org/gems/rudy4)
+[![Gem Downloads](https://img.shields.io/gem/dt/rudy4.svg)](https://rubygems.org/gems/rudy4)
+[![CI](https://github.com/tomash/rudy4/actions/workflows/ci.yml/badge.svg)](https://github.com/tomash/rudy4/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 **Write Ruby native extensions in D.** A from-scratch rewrite of
 [rudy](https://github.com/tomash/rudy) (2010), targeting **Ruby 4.0** and
 **GDC 14 (D front-end 2.10x)**.
+
+Already on RubyGems — scaffold and build a working D-backed extension gem in
+under a minute:
+
+```sh
+gem install rudy4
+rudy4 doctor              # verify Ruby + GDC toolchain (compiles a probe)
+rudy4 init fast_math      # write a small, self-contained extension gem
+cd fast_math && rake compile && rake test
+```
+
+See [Getting started](#getting-started-the-rudy4-gem) for the details.
 
 The 2010 original bound Ruby 1.8's C API via a bcd.gen-generated `ruby.d`,
 required a separate `meta/` template-metaprogramming library, and built with
@@ -257,9 +274,10 @@ functions (`rb_string_value_ptr`, `rb_float_value`, `rb_ary_entry`, ...).
 
 ## Getting started: the `rudy4` gem
 
-The fastest way in is the `rudy4` gem. It scaffolds a self-contained
-extension gem — the rudy4 D library is copied into it, so the project builds
-with nothing but GDC and your Ruby headers, no checkout and no `RUDY4_ROOT`:
+The fastest way in is the [`rudy4` gem on RubyGems](https://rubygems.org/gems/rudy4).
+It scaffolds a self-contained extension gem — the rudy4 D library is copied
+into it, so the project builds with nothing but GDC and your Ruby headers, no
+checkout and no `RUDY4_ROOT`:
 
 ```sh
 gem install rudy4
