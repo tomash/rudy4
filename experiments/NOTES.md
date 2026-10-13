@@ -1,6 +1,6 @@
 # Experiments — Findings & Notes
 
-Ten torture tests, all passing (`make exp-test`):
+Eleven torture tests, all passing (`make exp-test`):
 
 | # | Experiment | What it tortures |
 |---|------------|------------------|
@@ -14,6 +14,7 @@ Ten torture tests, all passing (`make exp-test`):
 | 8 | `exp_convert` | Conversion-layer round trips: integers at ±2^63/2^64-1 boundaries, NaN/±0.0/inf, empty/NUL/binary/EUC-JP strings, frozen strings, 200-case binary fuzz, GC.stress mid-conversion, truthiness edges, hostile coercions (298 assertions; findings #12–#15) |
 | 9 | `exp_defargs` | `def!` argument-passing torture: blocks (call overloads, arity, reentrant `def!` inside a block body, raise-through-frame), `*rest` (bignum RangeError, empty-array semantics), `**kwargs` (symbol+string keys, D defaults, Raw!VALUE walk), `Self`, private/protected visibility, class singletons + per-object `def_singleton_on`, combined layouts (44 assertions; findings #16–#18) |
 | 10 | `exp_objproto` | Object protocol: allocate/dup/clone/==/eql?/hash/inspect/freeze on RudyObjectProtocol'd Vec2, Hash keying, GC storm (43 assertions; findings #19–#22) |
+| 11 | `exp_nonregression` | Documented non-goals (backlog item 9): Fiber switches through D frames, Ractor non-shareability (VM-enforced refusal), and GVL-held vs GVL-released interruptibility of a long D call (20 assertions; findings #25–#27) |
 
 ## Bugs found by the torture tests (and fixes)
 
@@ -273,6 +274,75 @@ Ten torture tests, all passing (`make exp-test`):
     This constrains but does not invalidate ASan coverage: every
     non-rt_init experiment now runs under a real memory-error detector.
 
+25. **Ractor calls into D are refused by the VM, not tolerated** — a
+    `def!`'d method is registered without Ruby's ractor-safe
+    declaration, so calling it from a non-main Ractor raises
+    `Ractor::UnsafeError` (surfaced as `Ractor::RemoteError` in the
+    spawning Ractor). Verified for pure D calls, for building a
+    D-wrapped object inside a Ractor, for passing one in, and for a
+    frozen one. `rb_ext_ractor_safe(bool)` IS exported by libruby, so
+    an extension *could* opt in — rudy deliberately does not, because a
+    D-wrapped object is an opaque non-Ruby object with a
+    D-runtime-owned payload that was never shareable and cannot be
+    moved between Ractors safely. The main Ractor keeps working
+    afterwards (exp_nonregression asserts all of this). NOT SUPPORTED —
+    a documented non-goal, not a bug.
+
+26. **Fiber switches work through D frames for value round-trips, but
+    carry no rooting guarantee** — `Fiber.yield` from inside a block
+    called by a D frame suspends and resumes the fiber with the D frame
+    still on the (fiber) stack: 100 consecutive switch round-trips
+    through a wrapped struct are all intact (exp_nonregression). What is
+    NOT promised: D's GC scans the *thread* stack, not Ruby's per-fiber
+    stacks, so a D-GC heap object reachable only from a fiber-stack
+    local has no root. Keep such objects reachable from a Ruby object or
+    a registered global (see finding #11 / exp_compact).
+
+27. **Interruptibility is a property of holding the GVL, not of rudy** —
+    a long pure-D call that holds the GVL ignores SIGINT until it
+    returns: a SIGINT sent 0.4 s into a 2.5 s `sleep_gvl` wait lands at
+    2.6 s (measured). The same wait under `rb_thread_call_without_gvl`
+    with a cooperating unblock function stops in ~0.4 s — both for
+    SIGINT and for `Thread#raise` on the main thread. `ruby_thread_has_gvl_p`
+    IS exported, so a future binding could let D assert GVL state, but
+    the fix for interrupting a long call is to release the GVL via
+    `rb_thread_call_without_gvl` and provide a real ubf — not an API
+    gap in rudy. Note a no-op ubf (as in `src/dexitest.d`) means the
+    wait still runs to completion: the ubf is what makes it
+    interruptible.
+
+## Documented non-goals (backlog item 9)
+
+Three boundaries are deliberately *not* promises. `exp_nonregression`
+pins the observable behaviour so the limits are documented with evidence
+rather than silence; findings #25–#27 above are the detail.
+
+**1. Fiber switching across D frames.** A Ruby Fiber may switch stacks
+while D frames sit below on that fiber's stack. Supported: simple value
+round-trips. `Fiber.yield` from inside a block that a D frame called
+suspends the fiber with the D frame still on the stack; on resume the
+frame continues and its wrapped payload is intact (100 consecutive
+switch round-trips asserted). Not promised: rooting a D-GC heap object
+that is reachable *only* from a fiber-stack local — D's GC scans the
+thread stack, not Ruby's per-fiber stacks. Keep such objects reachable
+from a Ruby object or an `rb_gc_register_address` global.
+
+**2. Ractor-shareability.** D-wrapped objects and `def!`'d methods are
+not usable from a non-main Ractor: the VM raises `Ractor::UnsafeError`.
+`rb_ext_ractor_safe(true)` exists, but rudy does not opt in — a
+D-runtime-owned payload, a D GC, and (potentially) D TLS state are not
+shareable, and moving them across Ractor boundaries would be unsound.
+Use threads (which share the GVL) or separate processes instead.
+
+**3. Interruptibility of a long GVL-held D call.** A pure-D call that
+holds the GVL blocks Ruby's interrupt checks: SIGINT during `fib(40)` is
+delivered only when the call returns. This is inherent to holding the
+GVL. The escape hatch is the same as for any extension: run the long
+work under `rb_thread_call_without_gvl` with a cooperating unblock
+function, and the call becomes interruptible in milliseconds (asserted
+both for SIGINT and `Thread#raise`). rudy's `def!` does not do this for
+you — the GVL is held across a plain `def!`'d function body.
+
 ## ABI conformance audit (scripts/abi_audit.sh)
 
 `scripts/abi_audit.sh` diffs the `extern(C)` declarations in
@@ -327,6 +397,12 @@ Newly bound for the torture experiments (all in `rudy/bind/value.d`):
 - DELIBERATELY NOT bound: `rb_str_bytes_len` — inline-macro-only in
   rstring.h, NOT exported (dlopen symbol-lookup crash; see finding #12).
   Byte length goes through String#bytesize via rb_funcallv instead.
+- DELIBERATELY NOT bound: `rb_ext_ractor_safe` and
+  `ruby_thread_has_gvl_p`. Both ARE exported, but binding them would
+  advertise capabilities rudy does not have: extensions are registered
+  ractor-*unsafe* on purpose (finding #25), and GVL state is not
+  something `def!` manages for the caller (finding #27). Listed here so
+  the omission is a decision, not an oversight.
 
 - `rb_exc_raise` — re-raise the *same* exception VALUE from D (noreturn;
   callers need `assert(0)` after it to satisfy GDC's no-return analysis)
@@ -414,7 +490,7 @@ Still missing / future work:
 
 ```sh
 make exp            # build experiments
-make exp-test       # run all ten experiment suites
+make exp-test       # run all eleven experiment suites
 ruby test/run.rb    # core dextest suite
 make memcheck       # ASan subset (rt_init-free exps; NOTES #23/#24)
 bash scripts/memcheck.sh   # same, standalone (CI-friendly)

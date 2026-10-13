@@ -28,7 +28,7 @@ DFLAGS := -fPIC -Isrc -I$(RUBYHDR) -I$(RUBYARCHHDR) \
 
 DC_SRCS := $(wildcard src/rudy/*.d src/rudy/bind/*.d)
 
-EXP_SRCS := exp_wrap exp_cross exp_perf exp_http exp_gcstorm exp_exc exp_compact exp_convert exp_defargs exp_objproto
+EXP_SRCS := exp_wrap exp_cross exp_perf exp_http exp_gcstorm exp_exc exp_compact exp_convert exp_defargs exp_objproto exp_nonregression
 
 # rt_init-free subset that works under ASan (NOTES.md #23/#24).
 ASAN_EXP_SRCS := exp_wrap exp_cross exp_perf exp_exc exp_defargs exp_http
@@ -74,6 +74,7 @@ exp-test: exp
 	$(RUBY) experiments/test_exp_convert.rb
 	$(RUBY) experiments/test_exp_defargs.rb
 	$(RUBY) experiments/test_exp_objproto.rb
+	$(RUBY) experiments/test_exp_nonregression.rb
 
 ASAN_PRELOAD := LD_PRELOAD=$(shell $(GDC) -print-file-name=libasan.so)
 # detect_odr_violation=0: wrap/cross/perf .so's each embed a copy of the rudy

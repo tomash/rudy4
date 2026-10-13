@@ -75,4 +75,3 @@ done
 unset LD_PRELOAD
 echo "memcheck.sh rc=$rc_all"
 exit $rc_all
-{"id":"7bffbd27-bc51-4099-8296-219463d451d0","session_id":"9621158e975c2a39","timestamp":"2026-10-12T21:07:48+00:00","model":"openrouter/auto","provider":"openrouter","prompt_tokens":16440,"completion_tokens":22,"cache_read_tokens":16128,"cache_write_tokens":0,"cost_usd":0.0008642,"cost_source":"api"}

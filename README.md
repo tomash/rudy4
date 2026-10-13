@@ -236,7 +236,7 @@ src/rudy/objproto.d     RudyObjectProtocol mixin: dup/clone/==/hash/inspect/free
 src/dextest.d           acceptance-test extension (old "dexter" revived)
 src/dexitest.d          missing-API bindings acceptance extension
 src/dtypetest.d         typed-data acceptance extension
-experiments/           ten torture experiments (see experiments/NOTES.md)
+experiments/           eleven torture experiments (see experiments/NOTES.md)
 examples/hello_gem/    gem-shaped extension example (gemspec + ext/ + lib/)
 test/run.rb             Ruby-side acceptance suite (22 assertions)
 test/exitest.rb         bindings acceptance suite (31 assertions)
@@ -276,31 +276,53 @@ why installing outside the repo needs `RUDY4_ROOT`.
 
 ## Torture experiments (`experiments/`)
 
-Eight experiments probe the D↔Ruby seam far past what the acceptance
+Eleven experiments probe the D↔Ruby seam far past what the acceptance
 suites cover — GVL-released blocking I/O with a hand-written TCP server,
 48k-object TypedData GC storms against a concurrent `GC.collect()` churn
 thread, 50-level exception ping-pong with `rb_rescue`/`rb_ensure`/nested
-`rb_protect` and `rb_exc_raise` identity, perf, and conversion round trips
+`rb_protect` and `rb_exc_raise` identity, perf, conversion round trips
 across every supported D type (integers at ±2^63/2^64-1, NaN/inf,
-multibyte/binary/invalid-encoding strings, GC.stress at the seam, and the
-`def!` argument-passing machinery itself — blocks, `*rest`, `**kwargs`,
-visibility, singletons). They found
+multibyte/binary/invalid-encoding strings, GC.stress at the seam), the
+`def!` argument-passing machinery itself (blocks, `*rest`, `**kwargs`,
+visibility, singletons), a full object protocol (`dup`/`clone`/`==`/
+`hash`/`inspect`/`freeze`), and a non-regression suite for the documented
+non-goals (Fiber switches, Ractor refusal, GVL-held interruptibility).
+They found
 nineteen real bugs (ABI widths, a missing `rt_init()`, thread-local-by-default module
-state, a TypedData free-callback routing bug, ...) plus five toolchain
-findings (#20–#24: object-protocol semantics, the zalloc size-arg bug,
-GDC template-arg quirks, and the gdc-14 ASan/rt_init limitations), all
+state, a TypedData free-callback routing bug, ...) plus eight toolchain /
+boundary findings (#20–#27: object-protocol semantics, the zalloc
+size-arg bug, GDC template-arg quirks, the gdc-14 ASan/rt_init
+limitations, and the three non-goals), all
 documented with
 fixes in **experiments/NOTES.md** — that file is the real catalog of
 D-specific traps when writing Ruby extensions. Run them with `make exp`
 then `make exp-test`.
+
+## Known limitations (non-goals)
+
+Three things rudy deliberately does **not** promise. Each is pinned by
+`experiments/test_exp_nonregression.rb` so the boundary is evidence, not
+silence (see NOTES.md findings #25–#27):
+
+- **Fiber switching across D frames** — simple value round-trips across a
+  `Fiber.yield` inside a D frame work, but a D-GC object reachable only
+  from a fiber-stack local has no GC root (D's GC scans the thread stack,
+  not Ruby's fiber stacks).
+- **Ractor-shareability** — calling `def!`'d methods from a non-main
+  Ractor is refused by the VM (`Ractor::UnsafeError`); D-wrapped objects
+  are not shareable. Use threads or separate processes.
+- **Interruptibility of a long GVL-held D call** — a pure-D call holding
+  the GVL ignores Ctrl-C until it returns. Run long work under
+  `rb_thread_call_without_gvl` (with a cooperating unblock function) and
+  it becomes interruptible in milliseconds.
 
 ## Build & test
 
 ```sh
 make        # builds .build/dextest.so, .build/dexitest.so and .build/dtypetest.so
 make test   # runs test/run.rb + test/exitest.rb + test/typedtest.rb (62 assertions)
-make exp    # builds the ten experiment extensions (experiments/)
-make exp-test  # runs all ten torture suites (432 assertions, see experiments/NOTES.md)
+make exp    # builds the eleven experiment extensions (experiments/)
+make exp-test  # runs all eleven torture suites (452 assertions, see experiments/NOTES.md)
 make memcheck  # ASan subset: builds .build.asan and runs the rt_init-free suites
 ```
 
@@ -327,5 +349,3 @@ make test RUBY=~/.asdf/installs/ruby/4.0.7/bin/ruby
 ## License
 
 MIT — see [LICENSE](LICENSE) (as the original rudy).
-{"id":"68e8e704-0284-4ad5-a0cb-bb18d9e07247","session_id":"9621158e975c2a39","timestamp":"2026-10-12T11:17:34+00:00","model":"openrouter/auto","provider":"openrouter","prompt_tokens":29562,"completion_tokens":18,"cache_read_tokens":29184,"cache_write_tokens":0,"cost_usd":0.0015249,"cost_source":"api"}
-{"id":"36b596c4-88a5-498a-9bb5-d502dee57cc1","session_id":"86e7421794b3de46","timestamp":"2026-10-12T12:11:19+00:00","model":"openrouter/auto","provider":"openrouter","prompt_tokens":14236,"completion_tokens":65,"cache_read_tokens":0,"cache_write_tokens":0,"cost_usd":0.0021679,"cost_source":"api"}
